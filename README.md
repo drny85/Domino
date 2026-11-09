@@ -29,7 +29,17 @@ bun run typecheck
 bun run build
 ```
 
-Deploy: `bunx convex deploy` for the backend, then deploy the Next.js app (e.g. Vercel) with `NEXT_PUBLIC_CONVEX_URL` set.
+### Deploy on Vercel
+
+`vercel.json` makes each Vercel build deploy the Convex functions first and
+then build Next.js with the right `NEXT_PUBLIC_CONVEX_URL`. The only thing to
+set is one environment variable:
+
+1. In the Convex dashboard, create a project and generate a deploy key
+   (Settings → URL & Deploy Key).
+2. Import the repo in Vercel and add `CONVEX_DEPLOY_KEY` with that key.
+   Use a production key for the Production environment, and a preview
+   key for Preview if you want each PR to get its own Convex backend.
 
 ## How it fits together
 
