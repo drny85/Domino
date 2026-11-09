@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-felt-900: #0b2a1f;
+  --color-felt-800: #0f3a2b;
+  --color-felt-700: #155038;
+  --color-ivory: #f6f1e4;
+  --color-ivory-dark: #e6dcc4;
+  --color-pip: #1b1b1f;
+  --color-brass: #d4a548;
+  --color-brass-light: #f0c86b;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-felt-900);
+  color: #f5f5f4;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+.pt-safe { padding-top: max(env(safe-area-inset-top), 0.5rem); }
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0.5rem); }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(240 200 107 / 0.7); }
+  100% { box-shadow: 0 0 0 10px rgb(240 200 107 / 0); }
+}
+.turn-pulse { animation: pulse-ring 1.4s ease-out infinite; }
+
+@keyframes toast-in {
+  from { transform: translate(-50%, -8px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+.toast-in { animation: toast-in 160ms ease-out; }

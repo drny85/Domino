@@ -1,0 +1,184 @@
+"use client";
+
+import { useMutation } from "convex/react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api } from "../../convex/_generated/api";
+import { DominoFace } from "@/components/ui/DominoFace";
+import { useSession } from "@/lib/session";
+import { errorMessage } from "@/store/useGameStore";
+
+type MatchType = "1v1" | "2v2" | "cpu";
+type Mode = "draw" | "block";
+
+const MATCHES: { id: MatchType; title: string; detail: string }[] = [
+  { id: "1v1", title: "1 vs 1", detail: "Invite a friend" },
+  { id: "2v2", title: "2 vs 2", detail: "Teams, partners sit across" },
+  { id: "cpu", title: "vs CPU", detail: "Play solo right now" },
+];
+
+export default function Home() {
+  const router = useRouter();
+  const { session, setName, newTabIdentity } = useSession();
+  const createRoom = useMutation(api.games.createRoom);
+  const joinRoom = useMutation(api.games.joinRoom);
+
+  const [name, setLocalName] = useState("");
+  const [matchType, setMatchType] = useState<MatchType>("1v1");
+  const [mode, setMode] = useState<Mode>("draw");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (session) setLocalName(session.name);
+  }, [session]);
+
+  const ready = !!session && name.trim().length > 0;
+
+  async function onCreate() {
+    if (!session || !ready) return;
+    setBusy("create");
+    setError(null);
+    try {
+      setName(name.trim());
+      const res = await createRoom({ sessionId: session.sessionId, playerName: name.trim(), mode, matchType });
+      router.push(`/room/${res.code}`);
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(null);
+    }
+  }
+
+  async function onJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!session || !ready || code.trim().length !== 6) return;
+    setBusy("join");
+    setError(null);
+    try {
+      setName(name.trim());
+      const res = await joinRoom({ code: code.trim().toUpperCase(), sessionId: session.sessionId, playerName: name.trim() });
+      router.push(`/room/${res.code}`);
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(null);
+    }
+  }
+
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-4 pb-safe pt-safe">
+      <header className="flex flex-col items-center gap-3 pt-6">
+        <div className="flex items-end gap-2" aria-hidden>
+          <DominoFace a={6} b={6} className="w-10 -rotate-12" />
+          <DominoFace a={3} b={5} className="w-12" />
+          <DominoFace a={1} b={4} className="w-10 rotate-12" />
+        </div>
+        <h1 className="text-3xl font-bold tracking-tight">Dominoes</h1>
+        <p className="text-sm text-stone-300">Double-Six · real-time · no sign-up</p>
+      </header>
+
+      <section className="space-y-2">
+        <label htmlFor="name" className="text-xs font-semibold uppercase tracking-wider text-stone-400">
+          Your name
+        </label>
+        <input
+          id="name"
+          value={name}
+          onChange={(e) => setLocalName(e.target.value)}
+          maxLength={24}
+          autoComplete="nickname"
+          placeholder="e.g. Robert"
+          className="h-12 w-full rounded-xl border border-white/10 bg-black/30 px-4 text-base outline-none placeholder:text-stone-500 focus:border-brass"
+        />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">New game</h2>
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Match type">
+          {MATCHES.map((m) => (
+            <button
+              key={m.id}
+              role="radio"
+              aria-checked={matchType === m.id}
+              onClick={() => setMatchType(m.id)}
+              className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 text-center transition ${
+                matchType === m.id
+                  ? "border-brass bg-brass/15 text-white"
+                  : "border-white/10 bg-black/20 text-stone-300 active:bg-black/40"
+              }`}
+            >
+              <span className="text-base font-semibold">{m.title}</span>
+              <span className="text-[11px] leading-tight text-stone-400">{m.detail}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="Rules">
+          {(["draw", "block"] as const).map((m) => (
+            <button
+              key={m}
+              role="radio"
+              aria-checked={mode === m}
+              onClick={() => setMode(m)}
+              className={`h-10 flex-1 rounded-lg text-sm font-medium transition ${
+                mode === m ? "bg-white/15 text-white" : "text-stone-400"
+              }`}
+            >
+              {m === "draw" ? "Draw game" : "Block game"}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-stone-400">
+          {mode === "draw"
+            ? "Can't play? Draw from the boneyard until you can."
+            : "Can't play? Pass. No drawing."}
+        </p>
+
+        <button
+          onClick={onCreate}
+          disabled={!ready || busy !== null}
+          className="h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 shadow-lg shadow-black/30 transition active:scale-[0.98] disabled:opacity-40"
+        >
+          {busy === "create" ? "Creating…" : matchType === "cpu" ? "Play vs CPU" : "Create room"}
+        </button>
+      </section>
+
+      <form onSubmit={onJoin} className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">Join with a code</h2>
+        <div className="flex gap-2">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6))}
+            placeholder="ABCDEF"
+            inputMode="text"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-label="Room code"
+            className="h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 text-center font-mono text-lg tracking-[0.3em] outline-none placeholder:text-stone-600 focus:border-brass"
+          />
+          <button
+            type="submit"
+            disabled={!ready || code.length !== 6 || busy !== null}
+            className="h-12 rounded-xl border border-white/15 bg-white/10 px-5 font-semibold transition active:scale-[0.98] disabled:opacity-40"
+          >
+            {busy === "join" ? "…" : "Join"}
+          </button>
+        </div>
+      </form>
+
+      {error && (
+        <p role="alert" className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-100">
+          {error}
+        </p>
+      )}
+
+      <footer className="mt-auto pb-2 text-center text-xs text-stone-500">
+        {!ready && session && <p className="mb-2">Enter a name to start.</p>}
+        <button onClick={newTabIdentity} className="underline decoration-dotted underline-offset-4">
+          {session?.isTabIdentity ? "Using a separate identity in this tab" : "Testing? Use a separate player in this tab"}
+        </button>
+      </footer>
+    </main>
+  );
+}
