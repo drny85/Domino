@@ -10,6 +10,8 @@ import type { GhostSpec } from "@/components/3d/GameScene";
 import type { GameState } from "@/lib/types";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
 import { DominoFace } from "./DominoFace";
+import { TargetScoreToggle } from "./TargetScoreToggle";
+import { ThemeButton } from "./ThemePicker";
 
 const GameScene = dynamic(() => import("@/components/3d/GameScene"), {
   ssr: false,
@@ -164,7 +166,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-felt-900">
       {/* Top bar */}
       <header className="z-10 flex flex-col gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pt-safe">
-        <div className="flex items-center gap-2 text-xs text-stone-300">
+        <div className="flex items-center gap-2 whitespace-nowrap text-xs text-stone-300">
           <Link href="/" className="-ml-1 rounded-lg px-2 py-1.5 active:bg-white/10" aria-label="Back to lobby">
             ←
           </Link>
@@ -172,12 +174,16 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           <span className="text-stone-500">·</span>
           <span>Round {room.round}</span>
           <span className="text-stone-500">·</span>
-          <span>{room.mode === "draw" ? `Boneyard ${room.boneyardCount}` : "Block"}</span>
-          {isTeams && (
-            <span className="ml-auto rounded-full bg-black/40 px-2 py-0.5 font-medium">
-              A {teamScore(0)} · B {teamScore(1)}
-            </span>
-          )}
+          <span>To {room.targetScore}</span>
+
+          <span className="ml-auto flex items-center gap-2">
+            {isTeams && (
+              <span className="rounded-full bg-black/40 px-2 py-0.5 font-medium">
+                A {teamScore(0)} · B {teamScore(1)}
+              </span>
+            )}
+            <ThemeButton className="py-1" />
+          </span>
         </div>
         <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
           {others.map((o) => (
@@ -189,6 +195,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               showTeam={isTeams}
             />
           ))}
+          <div className="flex shrink-0 flex-col justify-center rounded-xl border border-white/5 bg-black/25 px-2.5 py-1.5 leading-tight">
+            <p className="text-[11px] text-stone-400">{room.mode === "draw" ? "Boneyard" : "Block game"}</p>
+            <p className="text-sm font-medium">{room.mode === "draw" ? `${room.boneyardCount} tiles` : "No drawing"}</p>
+          </div>
         </div>
       </header>
 
@@ -309,6 +319,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         <RoundOverSheet
           state={state}
           seats={seats}
+          sessionId={sessionId}
+          onError={showToast}
           onNext={async () => {
             try {
               await startGame({ roomId: room.id, sessionId });
@@ -352,11 +364,15 @@ function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active:
 function RoundOverSheet({
   state,
   seats,
+  sessionId,
+  onError,
   onNext,
   teamScore,
 }: {
   state: GameState;
   seats: Seat[];
+  sessionId: string;
+  onError: (msg: string) => void;
   onNext: () => void;
   teamScore: (team: number) => number;
 }) {
@@ -365,8 +381,18 @@ function RoundOverSheet({
   const isTeams = room.matchType === "2v2";
   const iWon = !!winner && !!me && (isTeams ? winner.team === me.team : winner.isMe);
 
-  const headline =
-    room.winReason === "blocked-tie"
+  const matchWinnerName = isTeams
+    ? `Team ${room.matchWinnerTeam === 0 ? "A" : "B"}`
+    : (seats.find((s) => s.seatIndex === room.matchWinnerTeam)?.name ?? "Someone");
+  const iWonMatch = room.matchOver && !!me && me.team === room.matchWinnerTeam;
+
+  const headline = room.matchOver
+    ? iWonMatch
+      ? isTeams
+        ? "Your team wins the match!"
+        : "You win the match!"
+      : `${matchWinnerName} wins the match`
+    : room.winReason === "blocked-tie"
       ? "Blocked: it's a tie"
       : iWon
         ? isTeams
@@ -387,7 +413,10 @@ function RoundOverSheet({
       <div className="w-full rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         <h2 className="text-center text-2xl font-bold">{headline}</h2>
-        <p className="mt-1 text-center text-sm text-stone-400">{reason}</p>
+        <p className="mt-1 text-center text-sm text-stone-400">
+          {room.matchOver ? `First to ${room.targetScore} points. ` : ""}
+          {reason}
+        </p>
 
         {isTeams && (
           <div className="mt-4 grid grid-cols-2 gap-2 text-center">
@@ -414,15 +443,27 @@ function RoundOverSheet({
           ))}
         </ul>
 
+        <div className="mt-4">
+          <TargetScoreToggle
+            roomId={room.id}
+            sessionId={sessionId}
+            value={room.targetScore}
+            editable={!!me?.isHost}
+            onError={onError}
+          />
+        </div>
+
         {me?.isHost ? (
           <button
             onClick={onNext}
-            className="mt-5 h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 active:scale-[0.98]"
+            className="mt-4 h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 active:scale-[0.98]"
           >
-            Next round
+            {room.matchOver ? "New match" : "Next round"}
           </button>
         ) : (
-          <p className="mt-5 text-center text-sm text-stone-400">Waiting for the host to start the next round…</p>
+          <p className="mt-4 text-center text-sm text-stone-400">
+            Waiting for the host to start the {room.matchOver ? "next match" : "next round"}…
+          </p>
         )}
         <Link href="/" className="mt-2 block py-2 text-center text-sm text-stone-500">
           Back to lobby

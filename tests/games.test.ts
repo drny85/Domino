@@ -219,3 +219,60 @@ describe("match types", () => {
     vi.useRealTimers();
   });
 });
+
+describe("points to win", () => {
+  it("defaults to 200 and only the host can change it between rounds", async () => {
+    const { t, roomId } = await setupRoom(2);
+    let s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.targetScore).toBe(200);
+    await expect(t.mutation(api.games.setTargetScore, { roomId, sessionId: S(1), targetScore: 100 })).rejects.toThrow(/host/);
+    await t.mutation(api.games.setTargetScore, { roomId, sessionId: S(0), targetScore: 100 });
+    s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.targetScore).toBe(100);
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    await expect(t.mutation(api.games.setTargetScore, { roomId, sessionId: S(0), targetScore: 200 })).rejects.toThrow(/between rounds/);
+  });
+
+  it.each([["1v1", 2], ["2v2", 4]] as const)("%s match ends when a side reaches 100, then a new match resets", async (_, n) => {
+    const t = convexTest(schema, modules);
+    const { roomId, code } = await t.mutation(api.games.createRoom, {
+      sessionId: S(0), playerName: "H", mode: "block", matchType: n === 4 ? "2v2" : "1v1", targetScore: 100,
+    });
+    for (let i = 1; i < n; i++) await t.mutation(api.games.joinRoom, { code, sessionId: S(i), playerName: `P${i}` });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    let rounds = 0;
+    for (let step = 0; step < 20000; step++) {
+      const pub = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      if (pub.room.status === "finished") {
+        rounds++;
+        const all = [{ team: pub.me!.team, score: pub.me!.score }, ...pub.opponents];
+        const totals = new Map<number, number>();
+        all.forEach((p) => totals.set(p.team, (totals.get(p.team) ?? 0) + p.score));
+        const best = Math.max(...totals.values());
+        expect(pub.room.matchOver).toBe(best >= 100);
+        if (pub.room.matchOver) {
+          expect(totals.get(pub.room.matchWinnerTeam!)).toBe(best);
+          await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+          const fresh = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+          expect(fresh.room.round).toBe(1);
+          expect(fresh.room.matchOver).toBe(false);
+          expect([fresh.me!.score, ...fresh.opponents.map((o) => o.score)].every((x) => x === 0)).toBe(true);
+          return;
+        }
+        await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+        continue;
+      }
+      const sid = S(pub.room.currentTurnSeat);
+      const s = (await t.query(api.games.getGameState, { roomId, sessionId: sid }))!;
+      if (s.room.board.length === 0) {
+        await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: s.me!.hand[0].id, targetSide: "root" });
+      } else if (s.me!.playable.length) {
+        const p = s.me!.playable[0];
+        await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: p.tileId, targetSide: p.sides[0] });
+      } else {
+        await t.mutation(api.games.drawOrPass, { roomId, sessionId: sid });
+      }
+    }
+    throw new Error(`match did not finish after ${rounds} rounds`);
+  }, 60000);
+});

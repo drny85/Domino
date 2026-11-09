@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { matchTypeValidator, modeValidator } from "./schema";
+import { matchTypeValidator, modeValidator, targetScoreValidator } from "./schema";
 import {
   blockedWinner,
   chooseCpuMove,
@@ -26,6 +26,7 @@ const CONNECTED_WINDOW_MS = 30_000;
 const MAX_NAME_LENGTH = 24;
 /** Delay before the CPU acts, so humans can follow what happened. */
 const CPU_THINK_MS = 900;
+export const DEFAULT_TARGET_SCORE = 200;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,15 +85,27 @@ async function finishRound(
   winReason: "domino" | "blocked" | "blocked-tie",
 ) {
   const hands = players.map((p) => p.hand);
+  const teams = teamsOf(room, players);
+  const scores = players.map((p) => p.score);
   if (winnerIdx !== null) {
     const winner = players[winnerIdx];
-    const points = roundPoints(hands, winnerIdx, teamsOf(room, players));
-    await ctx.db.patch(winner._id, { score: winner.score + points });
+    scores[winnerIdx] += roundPoints(hands, winnerIdx, teams);
+    await ctx.db.patch(winner._id, { score: scores[winnerIdx] });
   }
+
+  // Match over once a player (or team) reaches the target score.
+  const target = room.targetScore ?? DEFAULT_TARGET_SCORE;
+  const teamTotals = new Map<number, number>();
+  scores.forEach((sc, i) => teamTotals.set(teams[i], (teamTotals.get(teams[i]) ?? 0) + sc));
+  const leader = [...teamTotals.entries()].sort((a, b) => b[1] - a[1])[0];
+  const matchOver = !!leader && leader[1] >= target;
+
   await ctx.db.patch(room._id, {
     status: "finished",
     winnerSessionId: winnerIdx !== null ? players[winnerIdx].sessionId : undefined,
     winReason,
+    matchOver,
+    matchWinnerTeam: matchOver ? leader[0] : undefined,
   });
 }
 
@@ -199,8 +212,9 @@ export const createRoom = mutation({
     playerName: v.string(),
     mode: modeValidator,
     matchType: v.optional(matchTypeValidator),
+    targetScore: v.optional(targetScoreValidator),
   },
-  handler: async (ctx, { sessionId, playerName, mode, matchType = "1v1" }) => {
+  handler: async (ctx, { sessionId, playerName, mode, matchType = "1v1", targetScore = DEFAULT_TARGET_SCORE }) => {
     assertSessionId(sessionId);
     let code = generateRoomCode();
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -218,6 +232,7 @@ export const createRoom = mutation({
       hostSessionId: sessionId,
       mode,
       matchType,
+      targetScore,
       currentTurnSeat: 0,
       openEnds: { left: null, right: null },
       board: [],
@@ -326,6 +341,17 @@ export const switchSeat = mutation({
   },
 });
 
+/** Host changes the points needed to win. Not allowed mid-round. */
+export const setTargetScore = mutation({
+  args: { roomId: v.id("rooms"), sessionId: v.string(), targetScore: targetScoreValidator },
+  handler: async (ctx, { roomId, sessionId, targetScore }) => {
+    const room = await getRoomOrThrow(ctx, roomId);
+    if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the target");
+    if (room.status === "playing") throw new Error("Change the target between rounds");
+    await ctx.db.patch(roomId, { targetScore });
+  },
+});
+
 /** Presence ping; clients call this every ~10s while the room is open. */
 export const heartbeat = mutation({
   args: { roomId: v.id("rooms"), sessionId: v.string() },
@@ -353,11 +379,13 @@ export const startGame = mutation({
       throw new Error(`This match needs ${needed} players (${players.length} seated)`);
     }
 
+    // A finished match starts over: scores back to zero, round 1.
+    const newMatch = !!room.matchOver;
     const { hands, boneyard } = deal(players.length);
     // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
     // In 2v2 the lobby already fills seats 0-3, so partners stay across.
     for (let i = 0; i < players.length; i++) {
-      await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i] });
+      await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
     }
 
     await ctx.db.patch(roomId, {
@@ -368,9 +396,11 @@ export const startGame = mutation({
       boneyard,
       winnerSessionId: undefined,
       winReason: undefined,
-      round: (room.round ?? 0) + 1,
+      round: newMatch ? 1 : (room.round ?? 0) + 1,
       consecutivePasses: 0,
       lastAction: undefined,
+      matchOver: false,
+      matchWinnerTeam: undefined,
     });
     await scheduleCpuIfNeeded(ctx, roomId);
   },
@@ -490,6 +520,9 @@ export const getGameState = query({
         matchType: room.matchType,
         seats: seatsFor(room.matchType),
         round: room.round ?? 0,
+        targetScore: room.targetScore ?? DEFAULT_TARGET_SCORE,
+        matchOver: !!room.matchOver,
+        matchWinnerTeam: room.matchWinnerTeam ?? null,
         currentTurnSeat: room.currentTurnSeat,
         openEnds: room.openEnds,
         board: room.board,

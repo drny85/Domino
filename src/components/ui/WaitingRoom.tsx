@@ -6,6 +6,8 @@ import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { GameState } from "@/lib/types";
 import { errorMessage } from "@/store/useGameStore";
+import { TargetScoreToggle } from "./TargetScoreToggle";
+import { ThemeButton } from "./ThemePicker";
 
 type SeatPerson = { name: string; isMe: boolean; isHost: boolean; isConnected: boolean; isBot: boolean };
 
@@ -87,7 +89,10 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-4 pb-safe pt-safe">
-      <header className="pt-4 text-center">
+      <div className="-mb-4 flex justify-end pt-2">
+        <ThemeButton />
+      </div>
+      <header className="text-center">
         <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">Room code</p>
         <p className="mt-1 font-mono text-4xl font-bold tracking-[0.25em] text-brass-light">{room.code}</p>
         <p className="mt-2 text-sm text-stone-300">
@@ -122,6 +127,14 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
           ))}
         </section>
       )}
+
+      <TargetScoreToggle
+        roomId={room.id}
+        sessionId={sessionId}
+        value={room.targetScore}
+        editable={!!me?.isHost}
+        onError={setError}
+      />
 
       {error && (
         <p role="alert" className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-100">

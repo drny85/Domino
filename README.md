@@ -3,16 +3,20 @@
 Real-time multiplayer Double-Six dominoes in the browser, built mobile-first.
 
 - **Match types:** 1 vs 1, 2 vs 2 teams (partners sit across and share a score), or 1 vs CPU.
+- **Points to win:** 100 or 200 (default 200). The host can change it in the lobby or between rounds.
+- **Table themes:** classic felts, baseball team colors and country flags, picked per player from the "Table" button.
 - **Rules:** "Draw" (draw from the boneyard when stuck) or "Block" (pass when stuck).
 - **Stack:** Next.js (App Router, TypeScript), Convex, React Three Fiber + drei, @react-spring/three, Zustand, Tailwind CSS v4.
 - **No sign-up:** each browser gets a guest `sessionId` in `localStorage`.
 
 ## Run it
 
+This project uses [bun](https://bun.sh).
+
 ```bash
-npm install
-npx convex dev        # first run: log in / pick a project; writes NEXT_PUBLIC_CONVEX_URL to .env.local
-npm run dev           # runs `next dev` and `convex dev` together
+bun install
+bunx convex dev       # first run: log in / pick a project; writes NEXT_PUBLIC_CONVEX_URL to .env.local
+bun run dev           # runs `next dev` and `convex dev` together
 ```
 
 Open http://localhost:3000. To try multiplayer alone, open a second tab and tap
@@ -20,12 +24,12 @@ Open http://localhost:3000. To try multiplayer alone, open a second tab and tap
 `localStorage`, so this gives the tab its own identity via `sessionStorage`).
 
 ```bash
-npm test              # rules, Convex functions (convex-test) and board-layout tests
-npm run typecheck
-npm run build
+bun run test          # rules, Convex functions (convex-test) and board-layout tests
+bun run typecheck
+bun run build
 ```
 
-Deploy: `npx convex deploy` for the backend, then deploy the Next.js app (e.g. Vercel) with `NEXT_PUBLIC_CONVEX_URL` set.
+Deploy: `bunx convex deploy` for the backend, then deploy the Next.js app (e.g. Vercel) with `NEXT_PUBLIC_CONVEX_URL` set.
 
 ## How it fits together
 
@@ -38,7 +42,7 @@ src/
   app/             / (lobby) and /room/[code] (join, waiting room, game)
   components/3d/   DominoTile, Table, CameraRig, GameScene
   components/ui/   GameView (HUD + hand tray), WaitingRoom, DominoFace
-  lib/             session (guest identity), boardLayout (snake layout), pips
+  lib/             session (guest identity), boardLayout (snake layout), pips, themes
   store/           Zustand UI state (selection, toasts)
 ```
 
@@ -70,10 +74,11 @@ because a session id is effectively a login token.)
 - Blocked: when nobody can play or draw, the lowest pip total (team total in
   2v2) wins and scores the opponents' pips. A tie for lowest scores nothing.
 - After a round the host can start the next one; scores carry over.
+- The match ends when a player (or team, in 2v2) reaches the points to win. "New match" resets scores.
 
 ### 3D
 
-Everything is procedural: tiles are drei `RoundedBox` bodies with cylinder
+Everything is procedural, including the table themes (flags and ballparks are drawn on a canvas): tiles are drei `RoundedBox` bodies with cylinder
 pips, a divider and a brass spinner; the felt is a generated canvas texture;
 lighting uses `<Environment>` with `<Lightformer>`s, so no HDR, `.glb` or font
 files are downloaded. The chain is laid out as a snake that turns at the edge

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import { DominoFace } from "@/components/ui/DominoFace";
+import { ThemeButton } from "@/components/ui/ThemePicker";
 import { useSession } from "@/lib/session";
 import { errorMessage } from "@/store/useGameStore";
 
@@ -26,6 +27,7 @@ export default function Home() {
   const [name, setLocalName] = useState("");
   const [matchType, setMatchType] = useState<MatchType>("1v1");
   const [mode, setMode] = useState<Mode>("draw");
+  const [targetScore, setTargetScore] = useState<100 | 200>(200);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function Home() {
     setError(null);
     try {
       setName(name.trim());
-      const res = await createRoom({ sessionId: session.sessionId, playerName: name.trim(), mode, matchType });
+      const res = await createRoom({ sessionId: session.sessionId, playerName: name.trim(), mode, matchType, targetScore });
       router.push(`/room/${res.code}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -67,7 +69,10 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-4 pb-safe pt-safe">
-      <header className="flex flex-col items-center gap-3 pt-6">
+      <div className="flex justify-end pt-2">
+        <ThemeButton />
+      </div>
+      <header className="flex flex-col items-center gap-3">
         <div className="flex items-end gap-2" aria-hidden>
           <DominoFace a={6} b={6} className="w-10 -rotate-12" />
           <DominoFace a={3} b={5} className="w-12" />
@@ -128,6 +133,25 @@ export default function Home() {
             </button>
           ))}
         </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-stone-300">Points to win</span>
+          <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="Points to win">
+            {([100, 200] as const).map((pts) => (
+              <button
+                key={pts}
+                role="radio"
+                aria-checked={targetScore === pts}
+                onClick={() => setTargetScore(pts)}
+                className={`h-9 w-16 rounded-lg text-sm font-semibold transition ${
+                  targetScore === pts ? "bg-white/15 text-white" : "text-stone-400"
+                }`}
+              >
+                {pts}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <p className="text-xs text-stone-400">
           {mode === "draw"
             ? "Can't play? Draw from the boneyard until you can."

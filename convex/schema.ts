@@ -13,6 +13,7 @@ export const boardTileValidator = v.object({
 });
 
 export const modeValidator = v.union(v.literal("draw"), v.literal("block"));
+export const targetScoreValidator = v.union(v.literal(100), v.literal(200));
 export const matchTypeValidator = v.union(v.literal("1v1"), v.literal("2v2"), v.literal("cpu"));
 
 export default defineSchema({
@@ -29,6 +30,10 @@ export default defineSchema({
     winReason: v.optional(v.string()),
     // Additions beyond the base spec:
     matchType: matchTypeValidator,
+    // Points a player (or team, in 2v2) needs to win the match. Default 200.
+    targetScore: v.optional(targetScoreValidator),
+    matchOver: v.optional(v.boolean()),
+    matchWinnerTeam: v.optional(v.number()),
     round: v.optional(v.number()),
     consecutivePasses: v.optional(v.number()),
     lastAction: v.optional(
