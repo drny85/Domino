@@ -4,6 +4,8 @@
  * drawn with the 2D canvas API, so no image files are downloaded.
  */
 
+import { brightYardBackdrop, brightYardFloor } from "./countryside";
+
 type Ctx = CanvasRenderingContext2D;
 
 export type Scene = {
@@ -183,98 +185,11 @@ export const SCENES: Scene[] = [
   {
     id: "countryside",
     name: "Countryside",
-    haze: "#bfe3f5",
-    ambient: 0.45,
-    sun: "#fff3d6",
-    floor: (ctx, s) => {
-      ctx.fillStyle = vgrad(ctx, 0, s, [
-        [0, "#6fae4e"],
-        [1, "#4f9440"],
-      ]);
-      ctx.fillRect(0, 0, s, s);
-      speckle(ctx, s, 3, 14000, ["#5da145", "#7dbb58", "#468a39", "#88c463"], 5);
-      // A dirt path winding off to the far side.
-      ctx.strokeStyle = "#b99564";
-      ctx.lineWidth = s * 0.07;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(s * 0.5, s * 0.5);
-      ctx.bezierCurveTo(s * 0.62, s * 0.3, s * 0.7, s * 0.25, s * 0.82, 0);
-      ctx.stroke();
-      // Worn earth where the table and chairs stand.
-      const g = ctx.createRadialGradient(s / 2, s / 2, s * 0.08, s / 2, s / 2, s * 0.27);
-      g.addColorStop(0, "#b08a5a");
-      g.addColorStop(1, "rgba(176,138,90,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, s, s);
-      speckle(ctx, s, 9, 900, ["#ffe14d", "#ffffff", "#ff8fb1", "#f7f2a0"], 3);
-      // A picnic blanket and a few hay bales nearby.
-      ctx.save();
-      ctx.translate(s * 0.72, s * 0.5);
-      ctx.rotate(0.2);
-      const q = s * 0.0125;
-      for (let i = 0; i < 8; i++)
-        for (let j = 0; j < 8; j++) {
-          ctx.fillStyle = (i + j) % 2 ? "#ffffff" : "#d7263d";
-          ctx.fillRect(i * q, j * q, q, q);
-        }
-      ctx.restore();
-      for (const [x, y] of [
-        [0.2, 0.42],
-        [0.24, 0.47],
-        [0.17, 0.5],
-      ]) {
-        ctx.fillStyle = "#e3c15a";
-        ctx.beginPath();
-        ctx.arc(s * x, s * y, s * 0.022, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#b9962f";
-        ctx.lineWidth = s * 0.002;
-        for (let r = 0.005; r < 0.022; r += 0.005) {
-          ctx.beginPath();
-          ctx.arc(s * x, s * y, s * r, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-      groundShade(ctx, s, 0.3);
-    },
-    backdrop: (ctx, w, h) => {
-      sky(ctx, w, h, "#6db9ee", "#d9f1fb");
-      ctx.fillStyle = "#fff6c4";
-      ctx.beginPath();
-      ctx.arc(w * 0.78, h * 0.2, h * 0.07, 0, Math.PI * 2);
-      ctx.fill();
-      cloud(ctx, w * 0.2, h * 0.2, h * 0.06);
-      cloud(ctx, w * 0.55, h * 0.13, h * 0.045);
-      hill(ctx, w, h * 0.55, h * 0.1, 0.6, "#8fc7a0", h);
-      hill(ctx, w, h * 0.66, h * 0.08, 2.2, "#6fb36a", h);
-      hill(ctx, w, h * 0.78, h * 0.05, 4, "#5aa24c", h);
-      // A small farmhouse and trees.
-      const hx = w * 0.3;
-      const hy = h * 0.7;
-      ctx.fillStyle = "#f3e2c0";
-      ctx.fillRect(hx, hy - h * 0.1, w * 0.07, h * 0.1);
-      ctx.fillStyle = "#b5462f";
-      ctx.beginPath();
-      ctx.moveTo(hx - w * 0.008, hy - h * 0.1);
-      ctx.lineTo(hx + w * 0.035, hy - h * 0.17);
-      ctx.lineTo(hx + w * 0.078, hy - h * 0.1);
-      ctx.fill();
-      const r = rng(21);
-      for (let i = 0; i < 16; i++) {
-        const x = r() * w;
-        const y = h * (0.68 + r() * 0.14);
-        const t = h * (0.05 + r() * 0.05);
-        ctx.fillStyle = "#5b3d24";
-        ctx.fillRect(x - t * 0.07, y - t * 0.5, t * 0.14, t * 0.6);
-        ctx.fillStyle = r() > 0.5 ? "#2f7d3a" : "#3c9146";
-        ctx.beginPath();
-        ctx.arc(x, y - t * 0.8, t * 0.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.fillStyle = "#5aa24c";
-      ctx.fillRect(0, h * 0.86, w, h * 0.14);
-    },
+    haze: "#c9eaf8",
+    ambient: 0.6,
+    sun: "#fff6dc",
+    floor: brightYardFloor,
+    backdrop: brightYardBackdrop,
   },
   {
     id: "beach",
