@@ -109,6 +109,8 @@ export const ES: Record<string, string> = {
   Countries: "Países",
   "Game room": "Sala de juegos",
   Countryside: "Campo",
+  "Countryside A": "Campo A",
+  "Countryside B": "Campo B",
   Beach: "Playa",
   Bodega: "Bodega",
   Pool: "Piscina",

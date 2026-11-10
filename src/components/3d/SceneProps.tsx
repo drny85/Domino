@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import * as THREE from "three";
+import { Countryside } from "./Countryside";
 import { FLOOR_Y } from "./Table";
 
 /** Stripes running around an object: one band per colour, repeated. */
@@ -50,5 +51,7 @@ function BeachProps() {
 /** Solid objects that stand around the table in a given surrounding. */
 export function SceneProps({ sceneId }: { sceneId: string }) {
   if (sceneId === "beach") return <BeachProps />;
+  if (sceneId === "countryside") return <Countryside variant="bright" />;
+  if (sceneId === "countryside-ranch") return <Countryside variant="ranch" />;
   return null;
 }
