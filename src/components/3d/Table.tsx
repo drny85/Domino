@@ -93,6 +93,46 @@ function makeWoodTexture(seed: number) {
   return tex;
 }
 
+function paint(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  draw(canvas.getContext("2d")!);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+const surroundingsCache = new Map<string, { floor: THREE.Texture; backdrop: THREE.Texture }>();
+function paintedSurroundings(scene: ReturnType<typeof getScene>) {
+  let hit = surroundingsCache.get(scene.id);
+  if (!hit) {
+    // Phones get a lighter ground: it fills less of a small screen and they have less memory.
+    const size = Math.min(window.screen.width, window.screen.height) <= 520 ? 1024 : 2048;
+    hit = {
+      floor: paint(size, size, (ctx) => scene.floor(ctx, size)),
+      backdrop: paint(size, size / 4, (ctx) => scene.backdrop(ctx, size, size / 4)),
+    };
+    surroundingsCache.set(scene.id, hit);
+  }
+  return hit;
+}
+
+const clothCache = new Map<string, THREE.Texture>();
+function paintedCloth(theme: ReturnType<typeof getTheme>) {
+  let hit = clothCache.get(theme.id);
+  if (!hit) {
+    const canvas = document.createElement("canvas");
+    paintTheme(theme, canvas, 1024);
+    hit = new THREE.CanvasTexture(canvas);
+    hit.colorSpace = THREE.SRGBColorSpace;
+    hit.anisotropy = 8;
+    clothCache.set(theme.id, hit);
+  }
+  return hit;
+}
+
 function Rail({ rotation, wood, darkWood, brass }: { rotation: number; wood: THREE.Material; darkWood: THREE.Material; brass: THREE.Material }) {
   const length = SURFACE_SIZE;
   const y = RAIL_TOP - RAIL_HEIGHT / 2;
@@ -180,40 +220,10 @@ export function Table() {
   const theme = getTheme(themeId);
   const scene = getScene(useThemeStore((s) => s.sceneId));
 
-  // The surroundings: a painted ground and a painted backdrop behind the far side.
-  const surroundings = useMemo(() => {
-    const paint = (w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      draw(canvas.getContext("2d")!);
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 8;
-      return tex;
-    };
-    return {
-      floor: paint(2048, 2048, (ctx) => scene.floor(ctx, 2048)),
-      backdrop: paint(2048, 512, (ctx) => scene.backdrop(ctx, 2048, 512)),
-    };
-  }, [scene]);
-  useEffect(
-    () => () => {
-      surroundings.floor.dispose();
-      surroundings.backdrop.dispose();
-    },
-    [surroundings],
-  );
-
-  const art = useMemo(() => {
-    const canvas = document.createElement("canvas");
-    paintTheme(theme, canvas, 1024);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    return tex;
-  }, [theme]);
-  useEffect(() => () => art.dispose(), [art]);
+  // The surroundings and the cloth are painted once per scene or theme and kept,
+  // so coming back to a table does not repaint several million pixels.
+  const surroundings = useMemo(() => paintedSurroundings(scene), [scene]);
+  const art = useMemo(() => paintedCloth(theme), [theme]);
 
   const mats = useMemo(() => {
     const woodTex = makeWoodTexture(11);

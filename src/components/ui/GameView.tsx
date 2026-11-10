@@ -202,11 +202,25 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   // Opponents sit around the table in turn order: next player on the right,
   // partner (or the only opponent) across, previous player on the left.
   // (When watching a CPU match the south seat's tiles are shown face up instead.)
-  const racks: RackSpec[] = others.filter((o) => o.seatIndex !== mySeat).map((o) => {
-    const rel = (o.seatIndex - mySeat + seats.length) % seats.length;
-    const side = seats.length === 2 ? "north" : rel === 1 ? "east" : rel === 2 ? "north" : "west";
-    return { side, count: o.tileCount, active: room.status === "playing" && room.currentTurnSeat === o.seatIndex };
-  });
+  const rackKey = others
+    .filter((o) => o.seatIndex !== mySeat)
+    .map((o) => {
+      const rel = (o.seatIndex - mySeat + seats.length) % seats.length;
+      const side = seats.length === 2 ? "north" : rel === 1 ? "east" : rel === 2 ? "north" : "west";
+      return `${side}:${o.tileCount}:${room.status === "playing" && room.currentTurnSeat === o.seatIndex ? 1 : 0}`;
+    })
+    .join(",");
+  // Rebuilt only when a rack really changes, so the 3D table is not redrawn for unrelated updates.
+  const racks: RackSpec[] = useMemo(
+    () =>
+      rackKey
+        ? rackKey.split(",").map((r) => {
+            const [side, count, active] = r.split(":");
+            return { side: side as RackSpec["side"], count: Number(count), active: active === "1" };
+          })
+        : [],
+    [rackKey],
+  );
 
   const sideOf = (seat: number): RackSpec["side"] => {
     const rel = (seat - mySeat + seats.length) % seats.length;
@@ -300,7 +314,14 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedRound]);
 
-  const ghosts: GhostSpec[] = selected ? selectedSides.map((side) => ({ side, tile: selected })) : [];
+  const ghostKey = selected ? `${selected.id}:${selectedSides.join(",")}` : "";
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ghosts: GhostSpec[] = useMemo(() => (selected ? selectedSides.map((side) => ({ side, tile: selected })) : []), [ghostKey]);
+  const ghostRef = useRef<(side: Side) => void>(() => {});
+  ghostRef.current = (side) => {
+    if (selected) void play(selected, side);
+  };
+  const onGhost = useCallback((side: Side) => ghostRef.current(side), []);
   const lastPlayedId = room.lastAction?.kind === "play" ? (room.lastAction.tileId ?? null) : null;
 
   const activity = (() => {
@@ -352,7 +373,6 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     : isMyTurn
       ? t("It's your turn!")
       : t("Waiting for {name}…", { name: current?.name ?? "…" });
-  const secondsLeft = useCountdown(room.status === "playing" ? room.turnDeadline : null);
 
   // The tally: my side first, then the other side (teams in 2v2).
   const myTeam = me?.team ?? 0;
@@ -497,7 +517,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             openEnds={room.openEnds}
             lastPlayedId={lastPlayedId}
             ghosts={ghosts}
-            onGhost={(side) => selected && play(selected, side)}
+            onGhost={onGhost}
             zoom={zoom}
             racks={racks}
             drinks={drinks}
@@ -590,11 +610,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           />
           <p className={`min-w-0 truncate text-sm font-semibold ${compact ? "mr-auto rounded-full bg-black/45 px-3 py-1 backdrop-blur" : "flex-1"}`}>
             {turnText}
-            {secondsLeft !== null && (
-              <span className={`ml-2 tabular-nums ${secondsLeft <= 5 ? "font-bold text-red-400" : "text-stone-400"}`} aria-label={t("{n} seconds left", { n: secondsLeft })}>
-                {secondsLeft}s
-              </span>
-            )}
+<TurnClock deadline={room.status === "playing" ? room.turnDeadline : null} />
           </p>
           <div className={compact ? "absolute bottom-[var(--pad-b)] right-[var(--pad-r)] flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
             {reactionsOpen && (
@@ -1046,6 +1062,18 @@ function RoundOverSheet({
 }
 
 /** Whole seconds left until `deadline` (a server timestamp), or null without a timer. */
+/** Seconds left on the turn. It ticks on its own so the rest of the screen is not redrawn four times a second. */
+function TurnClock({ deadline }: { deadline: number | null }) {
+  const t = useT();
+  const secondsLeft = useCountdown(deadline);
+  if (secondsLeft === null) return null;
+  return (
+    <span className={`ml-2 tabular-nums ${secondsLeft <= 5 ? "font-bold text-red-400" : "text-stone-400"}`} aria-label={t("{n} seconds left", { n: secondsLeft })}>
+      {secondsLeft}s
+    </span>
+  );
+}
+
 function useCountdown(deadline: number | null): number | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

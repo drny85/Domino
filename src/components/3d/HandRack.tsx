@@ -2,7 +2,7 @@
 
 import { animated, useSpring } from "@react-spring/three";
 import { type ThreeEvent, useThree } from "@react-three/fiber";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { TILE_LENGTH, TileBody } from "./DominoTile";
 import { IVORY, ivoryTint } from "./materials";
@@ -46,6 +46,7 @@ const HandTile = memo(function HandTile({
       }),
     [tile.a, tile.b, tile.dim, tile.selected, tile.playable],
   );
+  useEffect(() => () => material.dispose(), [material]);
 
   return (
     <animated.group position-x={x} position-y={spring.y} scale={scale}>

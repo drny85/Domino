@@ -2,7 +2,7 @@
 
 import { Environment, Lightformer } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useMemo, useRef } from "react";
+import { memo, Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
@@ -122,11 +122,13 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: S
   );
 }
 
-export default function GameScene(props: SceneProps) {
+function GameScene(props: SceneProps) {
   const scene = getScene(useThemeStore((s) => s.sceneId));
   return (
     <Canvas
       shadows
+      // Draw only when something moves: an idle table costs the phone nothing.
+      frameloop="demand"
       dpr={[1, 2]}
       // Measure the layout box, not the on-screen box: the game screen may be CSS-rotated.
       resize={{ offsetSize: true }}
@@ -181,3 +183,6 @@ export default function GameScene(props: SceneProps) {
     </Canvas>
   );
 }
+
+// The parent redraws often (timers, reactions); the table only when its own inputs change.
+export default memo(GameScene);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { handLayout } from "./HandRack";
 import { RACK_Z, TABLE_HALF } from "./Table";
@@ -25,7 +25,7 @@ type Point = [x: number, y: number, z: number];
  * The +/- buttons scale the distance.
  */
 export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds; zoom?: number; handCount?: number }) {
-  const { camera, size } = useThree();
+  const { camera, size, invalidate } = useThree();
   const desired = useRef(new THREE.Vector3());
   const look = useRef(new THREE.Vector3());
   const target = useRef(new THREE.Vector3());
@@ -89,7 +89,11 @@ export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds;
     cam.position.lerp(desired.current, k);
     look.current.lerp(target.current, k);
     cam.lookAt(look.current);
+    // Frames are drawn on demand: keep asking for them until the camera has settled.
+    if (cam.position.distanceToSquared(desired.current) > 1e-5 || look.current.distanceToSquared(target.current) > 1e-5) invalidate();
   });
+  // A new framing (zoom button, bigger chain, different hand) starts the glide.
+  useEffect(() => invalidate(), [invalidate, bounds, zoom, handCount, size.width, size.height]);
 
   return null;
 }

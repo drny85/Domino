@@ -1,12 +1,11 @@
 "use client";
 
-import { RoundedBox } from "@react-three/drei";
 import { animated, useSpring } from "@react-spring/three";
 import type { ThreeEvent } from "@react-three/fiber";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { PIP_LAYOUT } from "@/lib/pips";
-import { contactShadowTexture, IVORY, ivoryTint, pipTexture } from "./materials";
+import { contactShadowTexture, IVORY, ivoryTint, pipTexture, tileBackGeometry } from "./materials";
 
 export const TILE_WIDTH = 1;
 export const TILE_HEIGHT = 0.25;
@@ -60,7 +59,8 @@ function Pips({ value, half }: { value: number; half: -1 | 1 }) {
 export function TileBody({ a, b, material }: { a: number; b: number; material: THREE.Material }) {
   return (
     <>
-      <RoundedBox args={[TILE_WIDTH, TILE_HEIGHT, TILE_LENGTH]} radius={0.06} smoothness={4} material={material} castShadow receiveShadow />
+      {/* One shared rounded block for every tile on the table. */}
+      <mesh geometry={tileBackGeometry(TILE_WIDTH, TILE_HEIGHT, TILE_LENGTH)} material={material} castShadow receiveShadow />
       <mesh geometry={dividerGeometry} material={dividerMaterial} position={[0, TOP + 0.001, 0]} />
       <mesh geometry={spinnerGeometry} material={spinnerMaterial} position={[0, TOP, 0]} />
       <Pips value={a} half={-1} />
@@ -119,6 +119,7 @@ export const DominoTile = memo(function DominoTile({
       }),
     [a, b, ghost, highlight, hovered],
   );
+  useEffect(() => () => bodyMaterial.dispose(), [bodyMaterial]);
   // The dark crease under a tile resting on the felt. It fades in as the tile lands.
   const shadow = useSpring({ from: { scale: dropIn ? 2.2 : 1 }, to: { scale: 1 }, config: { mass: 1, tension: 210, friction: 22 } });
 
@@ -169,4 +170,21 @@ export const DominoTile = memo(function DominoTile({
     </animated.group>
     </>
   );
-});
+}, sameTile);
+
+/** Positions arrive as fresh arrays each time; compare what is inside them. */
+function sameTile(p: DominoTileProps, n: DominoTileProps) {
+  return (
+    p.a === n.a &&
+    p.b === n.b &&
+    p.position[0] === n.position[0] &&
+    p.position[1] === n.position[1] &&
+    p.position[2] === n.position[2] &&
+    p.rotationY === n.rotationY &&
+    p.ghost === n.ghost &&
+    p.highlight === n.highlight &&
+    p.dropIn === n.dropIn &&
+    !p.onSelect === !n.onSelect
+  );
+}
+
