@@ -218,6 +218,8 @@ async function scheduleNext(ctx: MutationCtx, roomId: Id<"rooms">) {
   const current = players.find((p) => p.seatIndex === room.currentTurnSeat);
   if (!current) return;
   if (current.isBot) {
+    // The last human's clock does not apply to the CPU.
+    if (room.turnDeadline !== undefined) await ctx.db.patch(roomId, { turnDeadline: undefined });
     await ctx.scheduler.runAfter(CPU_THINK_MS, internal.games.cpuTurn, {
       roomId,
       expectedSeat: room.currentTurnSeat,
