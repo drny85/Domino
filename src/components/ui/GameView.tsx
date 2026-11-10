@@ -473,10 +473,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               </span>
             )}
           </p>
-          <div className="relative flex shrink-0 gap-1">
+          <div className={compact ? "absolute bottom-1.5 right-2 flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
             {reactionsOpen && (
               <div
-                className="absolute bottom-11 right-0 z-30 grid w-64 grid-cols-3 gap-1.5 rounded-2xl border border-white/10 bg-stone-900/95 p-2 shadow-2xl backdrop-blur"
+                className={`absolute z-30 grid w-64 ${compact ? "bottom-0 right-11" : "bottom-11 right-0"} grid-cols-3 gap-1.5 rounded-2xl border border-white/10 bg-stone-900/95 p-2 shadow-2xl backdrop-blur`}
                 role="menu"
                 aria-label={t("Reactions")}
               >
@@ -490,7 +490,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
                     }}
                     className={`min-h-10 rounded-xl bg-white/10 px-1 active:bg-white/25 ${r.length <= 2 ? "text-2xl" : "text-xs font-semibold"}`}
                   >
-                    {r}
+                    {t(r)}
                   </button>
                 ))}
               </div>
@@ -874,7 +874,7 @@ function ReactionBubbles({ seats, mySeat, muted }: { seats: Seat[]; mySeat: numb
         return (
           <div key={`${s.seatIndex}:${r.at}`} className={`bubble-in absolute ${place(s.seatIndex)}`}>
             <div className="flex max-w-56 items-center gap-2 rounded-2xl bg-white px-3 py-2 text-stone-900 shadow-xl">
-              <span className={r.text.length <= 2 ? "text-3xl leading-none" : "text-base font-bold"}>{r.text}</span>
+              <span className={r.text.length <= 2 ? "text-3xl leading-none" : "text-base font-bold"}>{t(r.text)}</span>
               <span className="text-[11px] text-stone-500">{s.isMe ? t("You") : s.name}</span>
             </div>
           </div>

@@ -158,6 +158,8 @@ export const ES: Record<string, string> = {
   "Everyone passed! +{n} for {name}": "¡Pasaron todos! +{n} para {name}",
   "{n} seconds left": "Quedan {n} segundos",
   Reactions: "Reacciones",
+  // Reaction phrases are stored as sent; only these read differently in Spanish.
+  "¡Dale!": "¡Juega palomo!",
   "Send a reaction": "Enviar una reacción",
   "Turn sound on": "Activar sonido",
   "Turn sound off": "Quitar sonido",
