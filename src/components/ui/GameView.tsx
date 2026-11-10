@@ -45,6 +45,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
   const { selectedTileId, select, toast, showToast, clearToast, pending, setPending } = useGameStore();
   const [zoom, setZoom] = useState(1);
+  // The 3D scene takes a moment to build; cover the canvas until its first frame.
+  const [sceneReady, setSceneReady] = useState(false);
+  const onSceneReady = useCallback(() => setSceneReady(true), []);
 
   const seats: Seat[] = useMemo(() => {
     const list: Seat[] = opponents.map((o) => ({ ...o, isMe: false }));
@@ -243,6 +246,28 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           ? "CPU is thinking…"
           : `${current?.name ?? "…"}'s turn`;
 
+  // The tally: my side first, then the other side (teams in 2v2).
+  const myTeam = me?.team ?? 0;
+  const scoreSides: ScoreSide[] = isTeams
+    ? [myTeam, 1 - myTeam].map((team) => ({
+        label: seats
+          .filter((s) => s.team === team)
+          .map((s) => (s.isMe ? "You" : s.name))
+          .join(" & "),
+        score: teamScore(team),
+        mine: team === myTeam,
+      }))
+    : [...seats]
+        .sort((a, b) => Number(b.isMe) - Number(a.isMe))
+        .map((s) => ({
+          label: s.isMe ? "You" : s.name,
+          score: s.score,
+          mine: s.isMe,
+          tiles: s.tileCount,
+          offline: !s.isMe && !s.isConnected,
+          active: room.status === "playing" && room.currentTurnSeat === s.seatIndex,
+        }));
+
   return (
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-felt-900" onPointerDown={unlockAudio}>
       {/* Top bar */}
@@ -258,18 +283,14 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             <span className="min-[400px]:hidden">R</span>
             {room.round}
           </span>
-          <span className="text-stone-500">·</span>
-          <span>To {room.targetScore}</span>
 
           <span className="ml-auto flex items-center gap-2">
-            {isTeams && (
-              <span className="rounded-full bg-black/40 px-2 py-0.5 font-medium">
-                A {teamScore(0)} · B {teamScore(1)}
-              </span>
-            )}
             <ThemeButton className="py-1" />
           </span>
         </div>
+        <ScoreBoard sides={scoreSides} target={room.targetScore} boneyard={!isTeams && room.mode === "draw" ? room.boneyardCount : null} />
+        {/* Two-player games show the opponent inside the tally above. */}
+        {isTeams && (
         <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
           {others.map((o) => (
             <OpponentChip
@@ -280,14 +301,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               showTeam={isTeams}
             />
           ))}
-          {/* 2v2 deals all 28 tiles, so there is never a boneyard to show. */}
-          {!isTeams && (
-          <div className="flex shrink-0 flex-col justify-center rounded-xl border border-white/5 bg-black/25 px-2.5 py-1.5 leading-tight">
-            <p className="text-[11px] text-stone-400">{room.mode === "draw" ? "Boneyard" : "Block game"}</p>
-            <p className="text-sm font-medium">{room.mode === "draw" ? `${room.boneyardCount} tiles` : "No drawing"}</p>
-          </div>
-          )}
         </div>
+        )}
       </header>
 
       {/* 3D table */}
@@ -302,6 +317,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             zoom={zoom}
             racks={racks}
             myTurn={isMyTurn}
+            onReady={onSceneReady}
             hand={handSpecs}
             onHandTap={onHandTap}
             boneyardCount={room.mode === "draw" ? room.boneyardCount : 0}
@@ -309,10 +325,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-2 flex flex-col items-center gap-1">
-          {room.openEnds.left !== null && (
-            <div className="rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur">
-              Ends: <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
-            </div>
+          {activity && (
+            <div className="max-w-[80%] truncate rounded-full bg-black/45 px-3 py-1 text-xs text-stone-200 backdrop-blur">{activity}</div>
           )}
           {banner && (
             <div
@@ -334,38 +348,18 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           )}
         </div>
 
-        {/* Top right, clear of the player's rack at the bottom of the table. */}
-        <div className="absolute right-2 top-12 flex flex-col gap-2">
-          <button
-            onClick={() => {
-              unlockAudio();
-              toggleMuted();
-            }}
-            className="size-10 rounded-full bg-black/50 text-base backdrop-blur active:bg-black/70"
-            aria-label={muted ? "Turn sound on" : "Turn sound off"}
-            aria-pressed={!muted}
+        {room.openEnds.left !== null && (
+          <div
+            className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur"
+            aria-label={`Open ends ${room.openEnds.left} and ${room.openEnds.right}`}
           >
-            {muted ? "🔇" : "🔊"}
-          </button>
-          <button
-            onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))}
-            className="size-10 rounded-full bg-black/50 text-lg backdrop-blur active:bg-black/70"
-            aria-label="Zoom in"
-          >
-            +
-          </button>
-          <button
-            onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))}
-            className="size-10 rounded-full bg-black/50 text-lg backdrop-blur active:bg-black/70"
-            aria-label="Zoom out"
-          >
-            −
-          </button>
-        </div>
-
-        {activity && (
-          <div className="pointer-events-none absolute bottom-3 left-3 max-w-[60%] truncate rounded-full bg-black/40 px-3 py-1 text-xs text-stone-300 backdrop-blur">
-            {activity}
+            Ends <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
+          </div>
+        )}
+        {!sceneReady && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-felt-900">
+            <div className="size-8 animate-spin rounded-full border-2 border-white/20 border-t-brass" />
+            <p className="text-xs text-stone-400">Setting the table…</p>
           </div>
         )}
       </div>
@@ -378,9 +372,25 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             aria-hidden
           />
           <p className="min-w-0 flex-1 truncate text-sm font-semibold">{turnText}</p>
-          <span className="text-xs text-stone-400">
-            {me?.name} · {me?.score ?? 0} pts
-          </span>
+<div className="flex shrink-0 gap-1">
+            <button
+              onClick={() => {
+                unlockAudio();
+                toggleMuted();
+              }}
+              className="size-9 rounded-full bg-white/10 text-sm active:bg-white/20"
+              aria-label={muted ? "Turn sound on" : "Turn sound off"}
+              aria-pressed={!muted}
+            >
+              {muted ? "🔇" : "🔊"}
+            </button>
+            <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))} className="size-9 rounded-full bg-white/10 text-lg leading-none active:bg-white/20" aria-label="Zoom in">
+              +
+            </button>
+            <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))} className="size-9 rounded-full bg-white/10 text-lg leading-none active:bg-white/20" aria-label="Zoom out">
+              −
+            </button>
+          </div>
         </div>
 
         {selected && selectedSides.length === 2 && (
@@ -439,6 +449,69 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   );
 }
 
+type ScoreSide = {
+  label: string;
+  score: number;
+  mine: boolean;
+  /** Tiles in hand (two-player games, where the tally doubles as the opponent panel). */
+  tiles?: number;
+  offline?: boolean;
+  /** This side is to move. */
+  active?: boolean;
+};
+
+/** Match tally: both scores, how close each is to the target, and who leads. */
+function ScoreBoard({ sides, target, boneyard }: { sides: ScoreSide[]; target: number; boneyard: number | null }) {
+  if (sides.length < 2) return null;
+  const [a, b] = sides;
+  const lead = a.score - b.score;
+  const status = lead === 0 ? "Tied" : `${lead > 0 ? a.label : b.label} ${(lead > 0 ? a.label : b.label) === "You" ? "lead" : "leads"} by ${Math.abs(lead)}`;
+  const side = (s: ScoreSide, leading: boolean, align: "left" | "right") => (
+    <div className={`min-w-0 flex-1 ${align === "right" ? "text-right" : ""}`}>
+      <div className={`flex items-baseline gap-2 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        <span className={`text-2xl font-bold tabular-nums leading-none ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
+        <span className={`min-w-0 truncate text-xs ${leading ? "font-semibold text-brass-light" : "text-stone-300"}`}>
+          {leading && <span aria-hidden>★ </span>}
+          {s.label}
+          {s.offline && <span className="text-stone-500"> (away)</span>}
+        </span>
+        {s.tiles !== undefined && !s.mine && (
+          <span
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+              s.tiles <= 2 ? "bg-red-500/80 text-white" : "bg-white/10 text-stone-200"
+            } ${s.active ? "ring-1 ring-brass-light" : ""}`}
+            aria-label={`${s.tiles} tiles left`}
+          >
+            {s.tiles}
+            <span className="ml-1 inline-block h-3 w-1.5 rounded-[2px] bg-ivory align-[-1px]" aria-hidden />
+          </span>
+        )}
+      </div>
+      <div className={`mt-1 flex h-1.5 overflow-hidden rounded-full bg-white/10 ${align === "right" ? "justify-end" : ""}`}>
+        <div
+          className={`h-full rounded-full transition-[width] duration-700 ${leading ? "bg-brass-light" : s.mine ? "bg-emerald-400" : "bg-stone-400"}`}
+          style={{ width: `${Math.min(100, (s.score / target) * 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+  return (
+    <section
+      className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/35 px-3 py-2"
+      aria-label={`Score: ${a.label} ${a.score}, ${b.label} ${b.score}, playing to ${target}. ${status}.`}
+    >
+      {side(a, lead > 0, "left")}
+      <div className="shrink-0 text-center leading-tight">
+        <p className="text-[10px] uppercase tracking-wide text-stone-400">First to</p>
+        <p className="text-sm font-bold text-white">{target}</p>
+        <p className={`text-[10px] ${lead === 0 ? "text-stone-400" : "text-brass-light"}`}>{lead === 0 ? "Tied" : `+${Math.abs(lead)}`}</p>
+        {boneyard !== null && <p className="text-[10px] text-stone-400">Boneyard {boneyard}</p>}
+      </div>
+      {side(b, lead < 0, "right")}
+    </section>
+  );
+}
+
 function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active: boolean; partner: boolean; showTeam: boolean }) {
   const low = seat.tileCount <= 2;
   return (
@@ -468,7 +541,7 @@ function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active:
         </div>
       </div>
       <p className="truncate text-[11px] leading-none text-stone-400">
-        {seat.tileCount === 1 ? "1 tile left" : `${seat.tileCount} tiles left`} · {seat.score} pts
+        {seat.tileCount === 1 ? "1 tile left" : `${seat.tileCount} tiles left`}
         {showTeam && <> · {partner ? "partner" : seat.team === 0 ? "A" : "B"}</>}
       </p>
     </div>

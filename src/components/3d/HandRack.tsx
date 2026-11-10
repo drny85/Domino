@@ -1,7 +1,7 @@
 "use client";
 
 import { animated, useSpring } from "@react-spring/three";
-import type { ThreeEvent } from "@react-three/fiber";
+import { type ThreeEvent, useThree } from "@react-three/fiber";
 import { memo, useMemo } from "react";
 import * as THREE from "three";
 import { TILE_LENGTH, TileBody } from "./DominoTile";
@@ -69,14 +69,22 @@ const HandTile = memo(function HandTile({
 });
 
 /**
- * The player's own hand, standing face-up in the rack on their side of the
- * table. Tiles grow to fill the rack and squeeze together when the hand is big.
+ * Size and spacing of the hand in its rack. Tiles grow to fill the rack and
+ * squeeze together when the hand is big. On portrait screens they stay
+ * closer to board size so the camera can sit nearer the table.
  */
-export function HandRack({ tiles, onTap }: { tiles: HandTileSpec[]; onTap: (id: string) => void }) {
-  const n = Math.max(tiles.length, 1);
+export function handLayout(count: number, portrait: boolean) {
+  const n = Math.max(count, 1);
   const usable = RACK_LENGTH + 1.2;
-  const scale = Math.min(1.5, Math.max(0.85, usable / (n * 1.08)));
+  const scale = Math.min(portrait ? 1.05 : 1.5, Math.max(0.85, usable / (n * 1.08)));
   const spacing = Math.min(1.08 * scale, (usable - scale) / Math.max(n - 1, 1));
+  return { scale, spacing, halfWidth: ((n - 1) * spacing + scale) / 2 };
+}
+
+/** The player's own hand, standing face-up in the rack on their side of the table. */
+export function HandRack({ tiles, onTap }: { tiles: HandTileSpec[]; onTap: (id: string) => void }) {
+  const portrait = useThree((s) => s.size.width < s.size.height);
+  const { scale, spacing } = handLayout(tiles.length, portrait);
 
   return (
     <group position={[0, RACK_Y, RACK_Z + 0.15]}>

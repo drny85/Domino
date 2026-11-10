@@ -1,11 +1,13 @@
 "use client";
 
 import { Environment, Lightformer } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useMemo } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Suspense, useMemo, useRef } from "react";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
 import { footprint, layoutBoard } from "@/lib/boardLayout";
+import { getScene } from "@/lib/scenes";
+import { useThemeStore } from "@/store/useThemeStore";
 import { CameraRig, type Bounds } from "./CameraRig";
 import { BoneyardPile } from "./BoneyardPile";
 import { DominoTile } from "./DominoTile";
@@ -31,7 +33,21 @@ type SceneProps = {
   onHandTap: (id: string) => void;
   /** Face-down tiles left to draw (0 hides the pile). */
   boneyardCount: number;
+  /** Called once, after the first frame has been drawn. */
+  onReady?: () => void;
 };
+
+function FirstFrame({ onReady }: { onReady?: () => void }) {
+  const done = useRef(false);
+  useFrame(() => {
+    if (!done.current) {
+      done.current = true;
+      // The frame being drawn now is on screen by the next tick.
+      requestAnimationFrame(() => onReady?.());
+    }
+  });
+  return null;
+}
 
 /** Narrower rows on portrait screens so the snake grows downward. */
 function rowLimitFor(aspect: number) {
@@ -40,7 +56,8 @@ function rowLimitFor(aspect: number) {
   return 6;
 }
 
-function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: SceneProps) {
+function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: SceneProps) {
+  const handCount = hand.length;
   const { size } = useThree();
   const limit = rowLimitFor(size.width / Math.max(size.height, 1));
 
@@ -73,7 +90,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
 
   return (
     <>
-      <CameraRig bounds={bounds} zoom={zoom} />
+      <CameraRig bounds={bounds} zoom={zoom} handCount={handCount} />
       {placed.map((t) => (
         <DominoTile
           key={t.id}
@@ -101,6 +118,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
 }
 
 export default function GameScene(props: SceneProps) {
+  const scene = getScene(useThemeStore((s) => s.sceneId));
   return (
     <Canvas
       shadows
@@ -110,13 +128,14 @@ export default function GameScene(props: SceneProps) {
       gl={{ antialias: true, powerPreference: "high-performance" }}
       style={{ touchAction: "none" }}
     >
-      <color attach="background" args={["#120d0a"]} />
-      <fog attach="fog" args={["#120d0a", 55, 120]} />
-      <ambientLight intensity={0.18} />
+      <color attach="background" args={[scene.haze]} />
+      <fog attach="fog" args={[scene.haze, 55, 95]} />
+      <ambientLight intensity={0.18 + scene.ambient} />
       {/* Key light: a lamp above and slightly behind the player, casting soft shadows. */}
       <directionalLight
         position={[7, 18, 9]}
         intensity={2.3}
+        color={scene.sun}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
@@ -143,6 +162,7 @@ export default function GameScene(props: SceneProps) {
       <HandRack tiles={props.hand} onTap={props.onHandTap} />
       <BoneyardPile count={props.boneyardCount} />
       <Board {...props} />
+      <FirstFrame onReady={props.onReady} />
     </Canvas>
   );
 }

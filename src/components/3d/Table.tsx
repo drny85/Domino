@@ -3,6 +3,7 @@
 import { RoundedBox } from "@react-three/drei";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { getScene } from "@/lib/scenes";
 import { getTheme, paintTheme } from "@/lib/themes";
 import { useThemeStore } from "@/store/useThemeStore";
 
@@ -23,6 +24,8 @@ const CORNER = RAIL_WIDTH + 0.5;
 const LEG_LENGTH = 9;
 /** Height of the floor under the table. */
 export const FLOOR_Y = RAIL_TOP - RAIL_HEIGHT - LEG_LENGTH;
+const FLOOR_SIZE = 90;
+const BACKDROP_HEIGHT = 60;
 /** Usable length of a tile rack. */
 export const RACK_LENGTH = SURFACE_SIZE * 0.62;
 /** Where a rack sits on its rail, in the rail's local frame (see OpponentRack). */
@@ -131,35 +134,35 @@ function Corner({ x, z, wood, steel, steelDark }: { x: number; z: number; wood: 
   );
 }
 
-/** A soft pool of warm light on a dark wooden floor. */
-function makeFloorTexture() {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 20, size / 2, size / 2, size / 2);
-  g.addColorStop(0, "#4a3424");
-  g.addColorStop(0.45, "#2a1d15");
-  g.addColorStop(1, "#120d0a");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  // Floorboards.
-  ctx.strokeStyle = "rgba(0,0,0,0.28)";
-  ctx.lineWidth = 2;
-  for (let x = 0; x <= size; x += 32) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, size);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 export function Table() {
   const themeId = useThemeStore((s) => s.themeId);
   const theme = getTheme(themeId);
+  const scene = getScene(useThemeStore((s) => s.sceneId));
+
+  // The surroundings: a painted ground and a painted backdrop behind the far side.
+  const surroundings = useMemo(() => {
+    const paint = (w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      draw(canvas.getContext("2d")!);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      return tex;
+    };
+    return {
+      floor: paint(2048, 2048, (ctx) => scene.floor(ctx, 2048)),
+      backdrop: paint(2048, 512, (ctx) => scene.backdrop(ctx, 2048, 512)),
+    };
+  }, [scene]);
+  useEffect(
+    () => () => {
+      surroundings.floor.dispose();
+      surroundings.backdrop.dispose();
+    },
+    [surroundings],
+  );
 
   const art = useMemo(() => {
     const canvas = document.createElement("canvas");
@@ -181,7 +184,6 @@ export function Table() {
       steel: new THREE.MeshStandardMaterial({ color: "#d9dde0", roughness: 0.22, metalness: 1 }),
       steelDark: new THREE.MeshStandardMaterial({ color: "#6f757b", roughness: 0.4, metalness: 1 }),
       brass: new THREE.MeshStandardMaterial({ color: "#d4a548", roughness: 0.28, metalness: 0.9 }),
-      floorTex: makeFloorTexture(),
     };
   }, []);
   useEffect(
@@ -217,8 +219,12 @@ export function Table() {
         <boxGeometry args={[SURFACE_SIZE + RAIL_WIDTH, 1.1, SURFACE_SIZE + RAIL_WIDTH]} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, 0]} receiveShadow>
-        <planeGeometry args={[90, 90]} />
-        <meshStandardMaterial map={mats.floorTex} roughness={0.85} />
+        <planeGeometry args={[FLOOR_SIZE, FLOOR_SIZE]} />
+        <meshStandardMaterial map={surroundings.floor} roughness={0.9} />
+      </mesh>
+      <mesh position={[0, FLOOR_Y + BACKDROP_HEIGHT / 2, -FLOOR_SIZE / 2]}>
+        <planeGeometry args={[FLOOR_SIZE * 2.2, BACKDROP_HEIGHT]} />
+        <meshBasicMaterial map={surroundings.backdrop} fog={false} toneMapped={false} />
       </mesh>
     </group>
   );

@@ -3,29 +3,26 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRef } from "react";
 import * as THREE from "three";
-import { RACK_LENGTH, RACK_Z, TABLE_HALF } from "./Table";
+import { handLayout } from "./HandRack";
+import { RACK_Z, TABLE_HALF } from "./Table";
 
 export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
 const TILT = THREE.MathUtils.degToRad(33);
 const SIN = Math.sin(TILT);
 const COS = Math.cos(TILT);
-/** Half-width of the table shown by default on portrait screens, so tiles stay readable. */
-const PORTRAIT_HALF_WIDTH = 8;
-/** The view is centred a little toward the player, whose standing tiles need the room. */
-const TARGET_BIAS_Z = 1;
-/** Half-width of the player's hand in its rack, with a small margin. */
-const HAND_HALF = (RACK_LENGTH + 1.2) / 2 + 0.5;
+/** Portrait screens never zoom in past this half-width, so a short chain is not huge. */
+const PORTRAIT_MIN_HALF_WIDTH = 4.6;
 
 type Point = [x: number, y: number, z: number];
 
 /**
  * Sits at the player's side of the table looking down at it, like a seated
- * player. It always keeps the player's rack, the far rack and the whole
- * chain in view, shows the full table when the screen is wide enough, and
- * the +/- buttons scale the distance.
+ * player. Wide screens show the whole table. Phones held upright come in
+ * close: just the chain and the player's own rack, so tiles stay readable.
+ * The +/- buttons scale the distance.
  */
-export function CameraRig({ bounds, zoom = 1 }: { bounds: Bounds; zoom?: number }) {
+export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds; zoom?: number; handCount?: number }) {
   const { camera, size } = useThree();
   const desired = useRef(new THREE.Vector3());
   const look = useRef(new THREE.Vector3());
@@ -37,10 +34,16 @@ export function CameraRig({ bounds, zoom = 1 }: { bounds: Bounds; zoom?: number 
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
     const tanH = tanV * aspect;
 
+    const portrait = aspect < 1;
+    const hand = handLayout(handCount, portrait);
+    const handHalf = hand.halfWidth + 0.35;
+    const handTop = 2.1 * hand.scale + 0.8;
+
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cz = (bounds.minZ + bounds.maxZ) / 2;
-    // Follow the chain a little, but stay anchored to the table.
-    target.current.set(cx * 0.6, 0, cz * 0.6 + TARGET_BIAS_Z);
+    // Follow the chain a little, but stay anchored to the table. Portrait
+    // leans toward the player, where the chain and the rack both are.
+    target.current.set(cx * 0.6, 0, portrait ? Math.max(cz * 0.6, 0) + 3 : cz * 0.6 + 1);
     const tx = target.current.x;
     const tz = target.current.z;
 
@@ -53,27 +56,25 @@ export function CameraRig({ bounds, zoom = 1 }: { bounds: Bounds; zoom?: number 
       return Math.max(Math.abs(rx) / tanH, Math.abs(up) / tanV) + along;
     };
 
-    const margin = 1.4;
+    const margin = portrait ? 0.9 : 1.4;
     const points: Point[] = [
       // The player's hand, standing in the near rack.
-      [-HAND_HALF, 0.6, RACK_Z],
-      [HAND_HALF, 0.6, RACK_Z],
-      [0, 3, RACK_Z],
-      [0, 0.4, TABLE_HALF],
-      // The far rack and the tiles on it.
-      [0, 2.8, -RACK_Z],
+      [-handHalf, 0.6, RACK_Z],
+      [handHalf, 0.6, RACK_Z],
+      [0, handTop, RACK_Z],
+      [0, 0.4, TABLE_HALF - 0.6],
       // The chain.
       [bounds.minX - margin, 0, bounds.minZ - margin],
       [bounds.maxX + margin, 0, bounds.minZ - margin],
       [bounds.minX - margin, 0, bounds.maxZ + margin],
       [bounds.maxX + margin, 0, bounds.maxZ + margin],
     ];
-    if (aspect >= 1) {
-      // Room for the whole table, corner blocks included.
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) points.push([sx * (TABLE_HALF + 0.4), 0.6, sz * (TABLE_HALF + 0.4)]);
+    if (portrait) {
+      points.push([tx - PORTRAIT_MIN_HALF_WIDTH, 0, tz], [tx + PORTRAIT_MIN_HALF_WIDTH, 0, tz]);
     } else {
-      // Portrait: the full width would make tiles tiny, so show a comfortable slice.
-      points.push([tx - PORTRAIT_HALF_WIDTH, 0, tz], [tx + PORTRAIT_HALF_WIDTH, 0, tz]);
+      // Room for the far rack and the whole table, corner blocks included.
+      points.push([0, 2.8, -RACK_Z]);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) points.push([sx * (TABLE_HALF + 0.4), 0.6, sz * (TABLE_HALF + 0.4)]);
     }
 
     const dist = Math.max(...points.map(need)) * 1.02 * zoom;
