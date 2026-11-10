@@ -73,7 +73,9 @@ export default defineSchema({
       v.object({ points: v.number(), bonus: v.number(), bonusKind: v.optional(v.string()) }),
     ),
     bonusEvent: v.optional(v.object({ seatIndex: v.number(), kind: v.string(), points: v.number(), at: v.number() })),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_host", ["hostSessionId"]),
 
   players: defineTable({
     roomId: v.id("rooms"),
@@ -83,12 +85,22 @@ export default defineSchema({
     hand: v.array(tileValidator),
     score: v.number(),
     isBot: v.optional(v.boolean()),
-    // Heartbeat timestamp used to derive `isConnected`.
+    // Last time this player acted. Pings between moves go to `presence`.
     lastSeen: v.optional(v.number()),
     avatar: v.optional(v.string()),
     reaction: v.optional(v.object({ text: v.string(), at: v.number() })),
     // Asked for a drink: one stands in the cup holder on their right.
     drink: v.optional(v.boolean()),
+  })
+    .index("by_room", ["roomId"])
+    .index("by_room_session", ["roomId", "sessionId"]),
+
+  // Who has the room open right now. Kept apart from `players` so the
+  // frequent pings neither resend the game to everyone nor collide with moves.
+  presence: defineTable({
+    roomId: v.id("rooms"),
+    sessionId: v.string(),
+    lastSeen: v.number(),
   })
     .index("by_room", ["roomId"])
     .index("by_room_session", ["roomId", "sessionId"]),

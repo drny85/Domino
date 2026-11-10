@@ -211,6 +211,7 @@ export const ES: Record<string, string> = {
   "First to {n} points.": "A {n} puntos.",
   "+{n} points": "+{n} puntos",
   "+1 point": "+1 punto",
+  "Too many new rooms. Wait a minute and try again": "Demasiadas salas nuevas. Espera un minuto e inténtalo de nuevo",
   "This link only works on this computer. Open the game from its network address to invite phones.":
     "Este enlace solo funciona en esta computadora. Abre el juego desde su dirección de red para invitar teléfonos.",
   "includes a +{n} bonus": "incluye un bono de +{n}",

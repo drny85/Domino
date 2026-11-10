@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, expect, it, vi } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 import { validSides } from "../convex/lib/rules";
 
@@ -61,7 +61,7 @@ describe("information hiding", () => {
     expect(s!.room.boneyardCount).toBe(0);
     for (const o of s!.opponents) {
       expect(Object.keys(o).sort()).toEqual(
-        ["avatar", "drink", "finalPips", "id", "isBot", "isConnected", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
+        ["avatar", "drink", "finalPips", "id", "isBot", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
       );
       expect(o.tileCount).toBe(7);
     }
@@ -376,7 +376,15 @@ describe("watching a CPU match", () => {
     expect(start.opponents.every((o) => o.isBot)).toBe(true);
     expect(start.room.status).toBe("playing");
 
-    await t.finishAllScheduledFunctions(vi.runAllTimers, 20_000);
+    // The viewer stays: their pings keep the match dealing round after round.
+    for (let i = 0; i < 20_000; i++) {
+      if (i % 30 === 0) {
+        await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+        if ((await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!.room.matchOver) break;
+      }
+      vi.advanceTimersByTime(1000);
+      await t.finishInProgressScheduledFunctions();
+    }
     const end = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
     expect(end.room.matchOver).toBe(true);
     expect(end.room.round).toBeGreaterThan(1);
@@ -385,6 +393,67 @@ describe("watching a CPU match", () => {
     // The creator can ask for a rematch; a stranger cannot.
     await expect(t.mutation(api.games.startGame, { roomId, sessionId: S(5) })).rejects.toThrow(/host/);
     await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    vi.useRealTimers();
+  });
+});
+
+describe("load and housekeeping", () => {
+  it("a watched match stops dealing when the viewer leaves and resumes when they return", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId } = await t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw", matchType: "watch", targetScore: 200 });
+    // Nobody pings: play goes on for two minutes, then nothing more is dealt.
+    await t.finishAllScheduledFunctions(vi.runAllTimers, 20_000);
+    const idle = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(idle.room.status).toBe("finished");
+    expect(idle.room.matchOver).toBe(false);
+    expect(idle.room.round).toBeLessThan(9);
+    // The viewer comes back.
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+    vi.advanceTimersByTime(7000);
+    await t.finishInProgressScheduledFunctions();
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!.room.round).toBe(idle.room.round! + 1);
+    vi.useRealTimers();
+  });
+
+  it("pings are kept apart from the game, and show who is online", async () => {
+    const { t, roomId } = await setupRoom(2);
+    const before = await t.run(async (ctx) => (await ctx.db.query("players").collect()).map((p) => p.lastSeen));
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(1) });
+    const after = await t.run(async (ctx) => (await ctx.db.query("players").collect()).map((p) => p.lastSeen));
+    expect(after).toEqual(before);
+    const presence = await t.query(api.games.getPresence, { roomId });
+    expect(presence.seats.map((s) => s.seatIndex).sort()).toEqual([0, 1]);
+    expect(presence.seats.every((s) => presence.now - s.lastSeen < 5000)).toBe(true);
+    // A stranger's ping is ignored.
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(7) });
+    expect(await t.run(async (ctx) => (await ctx.db.query("presence").collect()).length)).toBe(1);
+  });
+
+  it("limits how fast one device can open rooms", async () => {
+    const t = convexTest(schema, modules);
+    const open = () => t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw" });
+    for (let i = 0; i < 5; i++) await open();
+    await expect(open()).rejects.toThrow(/Too many new rooms/);
+    // Another device is not affected.
+    await t.mutation(api.games.createRoom, { sessionId: S(1), playerName: "Other", mode: "draw" });
+  });
+
+  it("removes rooms left idle for a day, with their players and pings", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+    vi.advanceTimersByTime(23 * 60 * 60 * 1000);
+    expect(await t.mutation(internal.games.cleanupRooms, {})).toBe(0);
+    const fresh = await t.mutation(api.games.createRoom, { sessionId: S(3), playerName: "New", mode: "draw" });
+    vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+    expect(await t.mutation(internal.games.cleanupRooms, {})).toBe(1);
+    const left = await t.run(async (ctx) => ({
+      rooms: (await ctx.db.query("rooms").collect()).map((r) => r._id),
+      players: (await ctx.db.query("players").collect()).length,
+      pings: (await ctx.db.query("presence").collect()).length,
+    }));
+    expect(left).toEqual({ rooms: [fresh.roomId], players: 1, pings: 0 });
     vi.useRealTimers();
   });
 });

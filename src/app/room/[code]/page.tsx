@@ -4,11 +4,12 @@ import { useT } from "@/lib/i18n";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import { GameView } from "@/components/ui/GameView";
 import { WaitingRoom } from "@/components/ui/WaitingRoom";
 import { useSession } from "@/lib/session";
+import { withPresence } from "@/lib/types";
 import { errorMessage } from "@/store/useGameStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -29,10 +30,26 @@ export default function RoomPage() {
   const { session, setName } = useSession();
 
   const roomInfo = useQuery(api.games.getRoomByCode, { code });
-  const state = useQuery(
+  const serverState = useQuery(
     api.games.getGameState,
     roomInfo && session ? { roomId: roomInfo.roomId, sessionId: session.sessionId } : "skip",
   );
+  const presence = useQuery(api.games.getPresence, roomInfo ? { roomId: roomInfo.roomId } : "skip");
+  // Who is online keeps ageing between answers from the server, so re-check on a slow tick.
+  const presenceAt = useRef(0);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    presenceAt.current = Date.now();
+  }, [presence]);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 5000);
+    return () => clearInterval(id);
+  }, []);
+  const merged = serverState ? withPresence(serverState, presence, presenceAt.current ? Date.now() - presenceAt.current : 0) : serverState;
+  // Hand the same object down until something in it really changes, so the table is not redrawn for nothing.
+  const mergedKey = merged ? JSON.stringify([merged.me?.canStart, merged.opponents.map((o) => o.isConnected)]) : "";
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const state = useMemo(() => merged, [serverState, mergedKey]);
   const heartbeat = useMutation(api.games.heartbeat);
   const joinRoom = useMutation(api.games.joinRoom);
   const setAvatar = useMutation(api.games.setAvatar);
@@ -49,8 +66,10 @@ export default function RoomPage() {
   const roomId = roomInfo?.roomId;
   const sessionId = session?.sessionId;
   const seated = !!state?.me;
+  // The viewer of a watched match pings too: it stops dealing when they leave.
+  const present = seated || !!state?.spectator?.isHost;
   useEffect(() => {
-    if (!roomId || !sessionId || !seated) return;
+    if (!roomId || !sessionId || !present) return;
     const ping = () => void heartbeat({ roomId, sessionId }).catch(() => {});
     ping();
     const id = setInterval(ping, HEARTBEAT_MS);
@@ -60,7 +79,7 @@ export default function RoomPage() {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [roomId, sessionId, seated, heartbeat]);
+  }, [roomId, sessionId, present, heartbeat]);
 
   // Keep the seat's avatar in step with the one picked on this device.
   const seatAvatar = state?.me?.avatar;

@@ -30,8 +30,6 @@ import {
   type Side,
 } from "./lib/rules";
 
-/** A player counts as connected if they sent a heartbeat this recently. */
-const CONNECTED_WINDOW_MS = 30_000;
 const MAX_NAME_LENGTH = 24;
 /** Delay before the CPU acts, so humans can follow what happened. */
 const CPU_THINK_MS = 900;
@@ -43,6 +41,12 @@ const AWAY_CHECK_MS = 15_000;
 /** Pause before the server plays for someone who is already away. */
 const STAND_IN_DELAY_MS = 2_500;
 const REACTION_COOLDOWN_MS = 1_200;
+/** A watched CPU match stops dealing once its viewer has been gone this long. */
+const WATCH_IDLE_MS = 120_000;
+/** Rooms nobody has touched for this long are removed. */
+const ROOM_IDLE_MS = 24 * 60 * 60 * 1000;
+/** One device may open this many rooms a minute. */
+const ROOMS_PER_MINUTE = 5;
 /** Pause on the round summary before a watched CPU match deals again. */
 const WATCH_NEXT_ROUND_MS = 6_000;
 const WATCH_BOTS = [
@@ -84,6 +88,30 @@ function withRuleChange(room: Doc<"rooms">, changes: RuleChange[]) {
     }),
   ].filter((c) => c.from !== c.value); // put back to what it was: nothing to announce
   return { rulesChange: merged.length ? { at: Date.now(), changes: merged } : undefined };
+}
+
+async function presenceRow(ctx: QueryCtx, roomId: Id<"rooms">, sessionId: string) {
+  return await ctx.db
+    .query("presence")
+    .withIndex("by_room_session", (q) => q.eq("roomId", roomId).eq("sessionId", sessionId))
+    .unique();
+}
+
+/** Removes a room with its players and presence rows. */
+async function deleteRoom(ctx: MutationCtx, roomId: Id<"rooms">) {
+  for (const p of await getPlayers(ctx, roomId)) await ctx.db.delete(p._id);
+  const pings = await ctx.db
+    .query("presence")
+    .withIndex("by_room", (q) => q.eq("roomId", roomId))
+    .collect();
+  for (const r of pings) await ctx.db.delete(r._id);
+  await ctx.db.delete(roomId);
+}
+
+/** Last sign of life from a player: their latest move or their latest ping. */
+async function lastSeenOf(ctx: QueryCtx, p: Doc<"players">) {
+  const row = await presenceRow(ctx, p.roomId, p.sessionId);
+  return Math.max(p.lastSeen ?? 0, row?.lastSeen ?? 0);
 }
 
 function assertSessionId(sessionId: string) {
@@ -208,7 +236,7 @@ async function scheduleNext(ctx: MutationCtx, roomId: Id<"rooms">) {
   // Solo games against the CPU wait for the player unless a timer is set.
   const watchAway = room.matchType !== "cpu";
   if (deadline === undefined && !watchAway) return;
-  const away = watchAway && now - (current.lastSeen ?? 0) > AWAY_MS;
+  const away = watchAway && now - (await lastSeenOf(ctx, current)) > AWAY_MS;
   const delay = away ? STAND_IN_DELAY_MS : Math.min(deadline !== undefined ? deadline - now : Infinity, AWAY_CHECK_MS);
   await ctx.scheduler.runAfter(delay, internal.games.turnTick, { roomId, turnId });
 }
@@ -324,6 +352,14 @@ export const createRoom = mutation({
     { sessionId, playerName, mode, matchType = "1v1", targetScore = DEFAULT_TARGET_SCORE, avatar, cpuLevel = "normal" },
   ) => {
     assertSessionId(sessionId);
+    const recent = await ctx.db
+      .query("rooms")
+      .withIndex("by_host", (q) => q.eq("hostSessionId", sessionId))
+      .order("desc")
+      .take(ROOMS_PER_MINUTE);
+    if (recent.length === ROOMS_PER_MINUTE && Date.now() - recent[recent.length - 1]._creationTime < 60_000) {
+      throw new Error("Too many new rooms. Wait a minute and try again");
+    }
     let code = generateRoomCode();
     for (let attempt = 0; attempt < 10; attempt++) {
       const clash = await ctx.db
@@ -448,10 +484,11 @@ export const leaveRoom = mutation({
     if (room.status === "playing") throw new Error("You can't leave mid-round");
 
     await ctx.db.delete(me._id);
+    const ping = await presenceRow(ctx, roomId, sessionId);
+    if (ping) await ctx.db.delete(ping._id);
     const remaining = (await getPlayers(ctx, roomId)).filter((p) => !p.isBot);
     if (remaining.length === 0) {
-      for (const p of await getPlayers(ctx, roomId)) await ctx.db.delete(p._id);
-      await ctx.db.delete(roomId);
+      await deleteRoom(ctx, roomId);
       return;
     }
     if (room.hostSessionId === sessionId) {
@@ -571,8 +608,42 @@ export const tableReady = mutation({
 export const heartbeat = mutation({
   args: { roomId: v.id("rooms"), sessionId: v.string() },
   handler: async (ctx, { roomId, sessionId }) => {
+    const room = await ctx.db.get(roomId);
+    if (!room) return;
+    // Seated players, and the viewer who set up a watched match.
     const me = await getPlayer(ctx, roomId, sessionId);
-    if (me) await ctx.db.patch(me._id, { lastSeen: Date.now() });
+    if (!me && room.hostSessionId !== sessionId) return;
+    const row = await presenceRow(ctx, roomId, sessionId);
+    const now = Date.now();
+    // A watched match that stopped for want of a viewer deals again when they return.
+    const wasGone = !row || now - row.lastSeen > WATCH_IDLE_MS;
+    if (room.matchType === "watch" && room.status === "finished" && !room.matchOver && wasGone && room.round !== undefined) {
+      await ctx.scheduler.runAfter(WATCH_NEXT_ROUND_MS, internal.games.autoNextRound, { roomId, round: room.round });
+    }
+    if (row) await ctx.db.patch(row._id, { lastSeen: now });
+    else await ctx.db.insert("presence", { roomId, sessionId, lastSeen: now });
+  },
+});
+
+/**
+ * When each seat was last heard from, with the server's clock to measure
+ * against. Small and separate from the game state, so pings stay cheap.
+ */
+export const getPresence = query({
+  args: { roomId: v.id("rooms") },
+  handler: async (ctx, { roomId }) => {
+    const players = await getPlayers(ctx, roomId);
+    const rows = await ctx.db
+      .query("presence")
+      .withIndex("by_room", (q) => q.eq("roomId", roomId))
+      .collect();
+    return {
+      now: Date.now(),
+      seats: players.map((p) => ({
+        seatIndex: p.seatIndex,
+        lastSeen: Math.max(p.lastSeen ?? 0, rows.find((r) => r.sessionId === p.sessionId)?.lastSeen ?? 0),
+      })),
+    };
   },
 });
 
@@ -638,7 +709,7 @@ export const startGame = mutation({
     if (room.hostSessionId !== sessionId) {
       // Anyone seated may deal the next round when the host has gone away.
       const host = players.find((p) => p.sessionId === room.hostSessionId);
-      const hostAway = !host || Date.now() - (host.lastSeen ?? 0) > AWAY_MS;
+      const hostAway = !host || Date.now() - (await lastSeenOf(ctx, host)) > AWAY_MS;
       const seated = players.some((p) => p.sessionId === sessionId);
       if (!(room.status === "finished" && hostAway && seated)) throw new Error("Only the host can start the game");
     }
@@ -652,6 +723,9 @@ export const autoNextRound = internalMutation({
   handler: async (ctx, { roomId, round }) => {
     const room = await ctx.db.get(roomId);
     if (!room || room.status !== "finished" || room.matchOver || (room.round ?? 0) !== round) return;
+    // Nobody watching: stop here rather than play the match out for no one.
+    const viewer = await presenceRow(ctx, roomId, room.hostSessionId);
+    if (Date.now() - (viewer?.lastSeen ?? room._creationTime) > WATCH_IDLE_MS) return;
     await beginRound(ctx, roomId);
   },
 });
@@ -736,7 +810,7 @@ export const turnTick = internalMutation({
 
     const now = Date.now();
     const timedOut = room.turnDeadline !== undefined && now >= room.turnDeadline;
-    const away = room.matchType !== "cpu" && now - (me.lastSeen ?? 0) > AWAY_MS;
+    const away = room.matchType !== "cpu" && now - (await lastSeenOf(ctx, me)) > AWAY_MS;
     if (!timedOut && !away) {
       const wait = Math.min(room.turnDeadline !== undefined ? room.turnDeadline - now : Infinity, AWAY_CHECK_MS);
       await ctx.scheduler.runAfter(Math.max(wait, 250), internal.games.turnTick, { roomId, turnId });
@@ -796,14 +870,10 @@ export const getGameState = query({
     if (!room) return null;
     const players = await getPlayers(ctx, roomId);
     const me = players.find((p) => p.sessionId === sessionId) ?? null;
-    const now = Date.now();
-    const isConnected = (p: Doc<"players">) => !!p.isBot || now - (p.lastSeen ?? 0) < CONNECTED_WINDOW_MS;
     const seatOf = (sid: string | undefined) =>
       sid === undefined ? null : (players.find((p) => p.sessionId === sid)?.seatIndex ?? null);
     const teamOf = (seat: number) => (isTeamMatch(room.matchType) ? seat % 2 : seat);
     const finished = room.status === "finished";
-    const host = players.find((p) => p.sessionId === room.hostSessionId);
-    const hostAway = !host || now - (host.lastSeen ?? 0) > AWAY_MS;
 
     const hand = me?.hand ?? [];
     const isMyTurn = !!me && room.status === "playing" && room.currentTurnSeat === me.seatIndex;
@@ -855,8 +925,10 @@ export const getGameState = query({
             score: me.score,
             hand,
             isHost: room.hostSessionId === sessionId,
-            // The host deals; anyone may once the host has gone away.
-            canStart: room.hostSessionId === sessionId || (finished && hostAway),
+            // The host deals; anyone seated may once the host has gone away
+            // (the client checks that against getPresence, the server on the call).
+            canStart: room.hostSessionId === sessionId,
+            canStartIfHostAway: finished,
             avatar: me.avatar ?? null,
             reaction: me.reaction ?? null,
             drink: !!me.drink,
@@ -875,7 +947,6 @@ export const getGameState = query({
           seatIndex: p.seatIndex,
           tileCount: p.hand.length,
           score: p.score,
-          isConnected: isConnected(p),
           // Extras (no hidden info): team, bot flag, and a pip *total* only
           // once the round is over (to explain blocked results).
           team: teamOf(p.seatIndex),
@@ -886,5 +957,29 @@ export const getGameState = query({
           finalPips: finished ? pipTotal(p.hand) : null,
         })),
     };
+  },
+});
+
+/** Removes rooms that nobody has played in or looked at for a day. Run hourly. */
+export const cleanupRooms = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - ROOM_IDLE_MS;
+    // Oldest first: anything stale is at the front.
+    const rooms = await ctx.db.query("rooms").order("asc").take(200);
+    let removed = 0;
+    for (const room of rooms) {
+      if (room._creationTime > cutoff) break;
+      const players = await getPlayers(ctx, room._id);
+      const pings = await ctx.db
+        .query("presence")
+        .withIndex("by_room", (q) => q.eq("roomId", room._id))
+        .collect();
+      const lastActive = Math.max(room._creationTime, ...players.map((p) => p.lastSeen ?? 0), ...pings.map((r) => r.lastSeen));
+      if (lastActive > cutoff) continue;
+      await deleteRoom(ctx, room._id);
+      removed++;
+    }
+    return removed;
   },
 });
