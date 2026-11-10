@@ -8,11 +8,13 @@ export type GameViewport = {
   /** Size of the game screen as laid out (already swapped when rotated). */
   width: number;
   height: number;
-  /** Short landscape screen (a phone on its side): the HUD floats over the table. */
+  /** Short landscape screen (a phone on its side, a small tablet): the HUD floats over the table. */
   compact: boolean;
 };
 
 const PHONE_MAX_SHORT_SIDE = 520;
+/** Landscape screens up to this height are too short to give the table its own band. */
+const FLOATING_HUD_MAX_HEIGHT = 700;
 
 /**
  * The game is played in landscape on phones. Browsers cannot be relied on to
@@ -30,7 +32,7 @@ export function useGameViewport(): GameViewport {
       const rotate = phone && h > w;
       const width = rotate ? h : w;
       const height = rotate ? w : h;
-      setVp({ rotate, width, height, compact: height <= PHONE_MAX_SHORT_SIDE });
+      setVp({ rotate, width, height, compact: height <= PHONE_MAX_SHORT_SIDE || (width > height && height <= FLOATING_HUD_MAX_HEIGHT) });
     };
     update();
     window.addEventListener("resize", update);

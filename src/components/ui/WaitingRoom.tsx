@@ -124,6 +124,11 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
           <div className="mt-4 flex flex-col items-center gap-2">
             <QrCode value={`${window.location.origin}/room/${room.code}`} className="size-44 rounded-xl" />
             <p className="text-xs text-stone-400">{t("Scan with a phone camera to join")}</p>
+            {/^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname) && (
+              <p className="max-w-64 text-xs text-amber-300" role="note">
+                {t("This link only works on this computer. Open the game from its network address to invite phones.")}
+              </p>
+            )}
           </div>
         )}
       </header>

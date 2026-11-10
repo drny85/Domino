@@ -438,33 +438,54 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             </span>
           )}
         </div>
-        <div className={compact ? "order-2 mx-auto w-full max-w-sm" : ""}>
+        {!compact && (
           <ScoreBoard
             sides={scoreSides}
             target={room.targetScore}
             boneyard={!isTeams && room.mode === "draw" ? room.boneyardCount : null}
-            compact={compact}
           />
-        </div>
+        )}
         {compact && (
-          <div className="order-3 flex shrink-0 items-center gap-1.5">
+          <div className="order-3 ml-auto flex shrink-0 items-center gap-1.5">
             <LangToggle className="backdrop-blur" />
             <ThemeButton className="bg-black/45 py-1.5 backdrop-blur" />
           </div>
         )}
-        {/* Two-player games show the opponent inside the tally above. */}
-        {isTeams && (
-        <div className={compact ? "absolute left-[var(--pad-l)] top-12 flex w-32 flex-col gap-1" : "no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1"}>
-          {others.filter((o) => o.seatIndex !== mySeat).map((o) => (
-            <OpponentChip
-              key={o.seatIndex}
-              seat={o}
-              active={room.status === "playing" && room.currentTurnSeat === o.seatIndex}
-              partner={isTeams && me ? o.team === me.team : false}
-              showTeam={isTeams}
+        {/* On a phone in landscape the tally sits down the left edge, clear of the far player's tiles. */}
+        {compact && (
+          <div className="absolute left-[var(--pad-l)] top-12 flex w-36 flex-col gap-1">
+            <ScoreBoard
+              sides={scoreSides}
+              target={room.targetScore}
+              boneyard={!isTeams && room.mode === "draw" ? room.boneyardCount : null}
+              stacked
             />
-          ))}
-        </div>
+            {isTeams &&
+              others.filter((o) => o.seatIndex !== mySeat).map((o) => (
+                <OpponentChip
+                  key={o.seatIndex}
+                  seat={o}
+                  active={room.status === "playing" && room.currentTurnSeat === o.seatIndex}
+                  partner={isTeams && me ? o.team === me.team : false}
+                  showTeam={isTeams}
+                  slim
+                />
+              ))}
+          </div>
+        )}
+        {/* Two-player games show the opponent inside the tally above. */}
+        {isTeams && !compact && (
+          <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+            {others.filter((o) => o.seatIndex !== mySeat).map((o) => (
+              <OpponentChip
+                key={o.seatIndex}
+                seat={o}
+                active={room.status === "playing" && room.currentTurnSeat === o.seatIndex}
+                partner={isTeams && me ? o.team === me.team : false}
+                showTeam={isTeams}
+              />
+            ))}
+          </div>
         )}
       </header>
 
@@ -710,57 +731,90 @@ function ScoreBoard({
   sides,
   target,
   boneyard,
-  compact = false,
+  stacked = false,
 }: {
   sides: ScoreSide[];
   target: number;
   boneyard: number | null;
-  compact?: boolean;
+  /** Narrow card with one side per line, for the edge of a landscape phone. */
+  stacked?: boolean;
 }) {
   const t = useT();
   if (sides.length < 2) return null;
   const [a, b] = sides;
   const lead = a.score - b.score;
   const status = lead === 0 ? t("Tied") : t("{name} ahead by {n}", { name: lead > 0 ? a.label : b.label, n: Math.abs(lead) });
+  const label = `${t("Score")}: ${a.label} ${a.score}, ${b.label} ${b.score}. ${t("First to")} ${target}. ${status}.`;
+  const tilesBadge = (s: ScoreSide) =>
+    s.tiles !== undefined &&
+    !s.mine && (
+      <span
+        className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+          s.tiles <= 2 ? "bg-red-500/80 text-white" : "bg-white/10 text-stone-200"
+        } ${s.active ? "ring-1 ring-brass-light" : ""}`}
+        aria-label={t("{n} tiles left", { n: s.tiles })}
+      >
+        {s.tiles}
+        <span className="ml-1 inline-block h-3 w-1.5 rounded-[2px] bg-ivory align-[-1px]" aria-hidden />
+      </span>
+    );
+  const bar = (s: ScoreSide, leading: boolean) => (
+    <div
+      className={`h-full rounded-full transition-[width] duration-700 ${leading ? "bg-brass-light" : s.mine ? "bg-emerald-400" : "bg-stone-400"}`}
+      style={{ width: `${Math.min(100, (s.score / target) * 100)}%` }}
+    />
+  );
+  if (stacked) {
+    const row = (s: ScoreSide, leading: boolean) => (
+      <div>
+        <div className="flex items-center gap-1.5">
+          <span className={`min-w-0 flex-1 truncate text-xs ${leading ? "font-semibold text-brass-light" : "text-stone-300"}`}>
+            {leading && <span aria-hidden>★ </span>}
+            {s.label}
+            {s.offline && <span className="text-stone-500"> {t("(away)")}</span>}
+          </span>
+          {tilesBadge(s)}
+          <span className={`text-base font-bold tabular-nums leading-none ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
+        </div>
+        <div className="mt-1 flex h-1 overflow-hidden rounded-full bg-white/10">{bar(s, leading)}</div>
+      </div>
+    );
+    return (
+      <section className="flex flex-col gap-1.5 rounded-xl border border-white/10 bg-black/55 px-2.5 py-1.5 backdrop-blur" aria-label={label}>
+        {row(a, lead > 0)}
+        {row(b, lead < 0)}
+        <p className="truncate text-[10px] text-stone-400">
+          {t("to")} <span className="font-bold text-white">{target}</span>
+          {boneyard !== null && ` · ${t("Boneyard")} ${boneyard}`}
+        </p>
+      </section>
+    );
+  }
   const side = (s: ScoreSide, leading: boolean, align: "left" | "right") => (
     <div className={`min-w-0 flex-1 ${align === "right" ? "text-right" : ""}`}>
       <div className={`flex items-baseline gap-2 ${align === "right" ? "flex-row-reverse" : ""}`}>
-        <span className={`font-bold tabular-nums leading-none ${compact ? "text-lg" : "text-2xl"} ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
+        <span className={`font-bold tabular-nums leading-none text-2xl ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
         <span className={`min-w-0 truncate text-xs ${leading ? "font-semibold text-brass-light" : "text-stone-300"}`}>
           {leading && <span aria-hidden>★ </span>}
           {s.label}
           {s.offline && <span className="text-stone-500"> {t("(away)")}</span>}
         </span>
-        {s.tiles !== undefined && !s.mine && (
-          <span
-            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
-              s.tiles <= 2 ? "bg-red-500/80 text-white" : "bg-white/10 text-stone-200"
-            } ${s.active ? "ring-1 ring-brass-light" : ""}`}
-            aria-label={t("{n} tiles left", { n: s.tiles })}
-          >
-            {s.tiles}
-            <span className="ml-1 inline-block h-3 w-1.5 rounded-[2px] bg-ivory align-[-1px]" aria-hidden />
-          </span>
-        )}
+        {tilesBadge(s)}
       </div>
       <div className={`mt-1 flex h-1.5 overflow-hidden rounded-full bg-white/10 ${align === "right" ? "justify-end" : ""}`}>
-        <div
-          className={`h-full rounded-full transition-[width] duration-700 ${leading ? "bg-brass-light" : s.mine ? "bg-emerald-400" : "bg-stone-400"}`}
-          style={{ width: `${Math.min(100, (s.score / target) * 100)}%` }}
-        />
+        {bar(s, leading)}
       </div>
     </div>
   );
   return (
     <section
-      className={`flex items-center gap-3 rounded-xl border border-white/10 px-3 ${compact ? "bg-black/55 py-1 backdrop-blur" : "bg-black/35 py-2"}`}
-      aria-label={`${t("Score")}: ${a.label} ${a.score}, ${b.label} ${b.score}. ${t("First to")} ${target}. ${status}.`}
+      className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/35 px-3 py-2"
+      aria-label={label}
     >
       {side(a, lead > 0, "left")}
       <div className="shrink-0 text-center leading-tight">
-        {!compact && <p className="text-[10px] uppercase tracking-wide text-stone-400">{t("First to")}</p>}
+        <p className="text-[10px] uppercase tracking-wide text-stone-400">{t("First to")}</p>
         <p className="text-sm font-bold text-white">
-          {compact && <span className="text-[10px] font-normal text-stone-400">{t("to")} </span>}
           {target}
         </p>
         <p className={`text-[10px] ${lead === 0 ? "text-stone-400" : "text-brass-light"}`}>{lead === 0 ? t("Tied") : `+${Math.abs(lead)}`}</p>
@@ -771,16 +825,41 @@ function ScoreBoard({
   );
 }
 
-function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active: boolean; partner: boolean; showTeam: boolean }) {
+function OpponentChip({ seat, active, partner, showTeam, slim = false }: { seat: Seat; active: boolean; partner: boolean; showTeam: boolean; slim?: boolean }) {
   const low = seat.tileCount <= 2;
   const t = useT();
   const tilesLeft = seat.tileCount === 1 ? t("1 tile left") : t("{n} tiles left", { n: seat.tileCount });
+  const label = `${seat.name}: ${tilesLeft}, ${t("{n} points", { n: seat.score })}`;
+  // One line per player down the edge of a landscape phone.
+  if (slim) {
+    return (
+      <div
+        className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 backdrop-blur ${
+          active ? "turn-pulse border-brass-light bg-brass/25" : "border-white/10 bg-black/55"
+        }`}
+        aria-label={label}
+      >
+        <span className={`size-2 shrink-0 rounded-full ${seat.isConnected ? "bg-emerald-400" : "bg-stone-500"}`} />
+        <span className={`min-w-0 flex-1 truncate text-xs font-medium ${partner ? "text-emerald-200" : ""}`}>
+          {seat.avatar && <span aria-hidden>{seat.avatar} </span>}
+          {seat.name}
+        </span>
+        <span
+          className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${low ? "bg-red-500/80 text-white" : "bg-white/10 text-stone-200"}`}
+          aria-hidden
+        >
+          {seat.tileCount}
+          <span className="ml-1 inline-block h-3 w-1.5 rounded-[2px] bg-ivory align-[-1px]" />
+        </span>
+      </div>
+    );
+  }
   return (
     <div
       className={`flex min-w-0 flex-1 flex-col gap-1 rounded-xl border px-2.5 py-1.5 sm:max-w-56 ${
         active ? "turn-pulse border-brass-light bg-brass/15" : "border-white/10 bg-black/40"
       }`}
-      aria-label={`${seat.name}: ${tilesLeft}, ${t("{n} points", { n: seat.score })}`}
+      aria-label={label}
     >
       <div className="flex items-center gap-1.5">
         <span className={`size-2 shrink-0 rounded-full ${seat.isConnected ? "bg-emerald-400" : "bg-stone-500"}`} />
