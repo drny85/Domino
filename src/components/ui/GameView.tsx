@@ -890,7 +890,7 @@ function RoundOverSheet({
         </p>
         {room.lastRound && room.lastRound.points > 0 && (
           <p className="mt-2 text-center text-lg font-bold text-brass-light">
-            {t("+{n} points", { n: room.lastRound.points })}
+            {room.lastRound.points === 1 ? t("+1 point") : t("+{n} points", { n: room.lastRound.points })}
             {room.lastRound.bonus > 0 && (
               <span className="block text-xs font-semibold text-emerald-300">
                 {room.lastRound.bonusKind === "capicua" ? "¡Capicúa! " : ""}
@@ -920,7 +920,7 @@ function RoundOverSheet({
                 {s.isMe && <span className="text-stone-500"> {t("(you)")}</span>}
                 {s.seatIndex === room.winnerSeat && <span className="ml-1">🏆</span>}
               </span>
-              <span className="text-stone-400">{t("{n} pips left", { n: s.finalPips ?? 0 })}</span>
+              <span className="text-stone-400">{s.finalPips === 1 ? t("1 pip left") : t("{n} pips left", { n: s.finalPips ?? 0 })}</span>
               <span className="w-14 text-right font-semibold">{s.score} pts</span>
             </li>
           ))}
