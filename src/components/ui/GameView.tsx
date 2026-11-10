@@ -394,10 +394,12 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               transformOrigin: "top left",
               "--pad-l": "max(20px, env(safe-area-inset-top))",
               "--pad-r": "max(20px, env(safe-area-inset-bottom))",
+              "--pad-b": "max(20px, env(safe-area-inset-left))",
             } as React.CSSProperties)
           : ({
               "--pad-l": "max(20px, env(safe-area-inset-left))",
               "--pad-r": "max(20px, env(safe-area-inset-right))",
+              "--pad-b": "max(20px, env(safe-area-inset-bottom))",
             } as React.CSSProperties)
       }
       onPointerDown={() => {
@@ -512,7 +514,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
         {room.openEnds.left !== null && (
           <div
-            className={`pointer-events-none absolute rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur ${compact ? "bottom-14 left-[var(--pad-l)]" : "left-2 top-2"}`}
+            className={`pointer-events-none absolute rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur ${compact ? "bottom-16 left-[var(--pad-l)]" : "left-2 top-2"}`}
             aria-label={t("Open ends {left} and {right}", { left: room.openEnds.left, right: room.openEnds.right ?? "" })}
           >
             {t("Ends")} <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
@@ -557,10 +559,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         className={
           compact
             ? "pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col-reverse [&_button]:pointer-events-auto"
-            : "z-10 bg-gradient-to-t from-black/80 via-black/60 to-black/20 pb-safe"
+            : "z-10 bg-gradient-to-t from-black/80 via-black/60 to-black/20 pb-[var(--pad-b)]"
         }
       >
-        <div className={`flex items-center gap-2 ${compact ? "pb-2.5 pl-[var(--pad-l)] pr-[var(--pad-r)]" : "px-3 pt-2"}`}>
+        <div className={`flex items-center gap-2 ${compact ? "pb-[var(--pad-b)] pl-[var(--pad-l)] pr-[var(--pad-r)]" : "px-3 pt-2"}`}>
           <span
             className={`size-2.5 rounded-full ${me?.isMyTurn ? "turn-pulse bg-brass-light" : "bg-stone-600"}`}
             aria-hidden
@@ -573,7 +575,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               </span>
             )}
           </p>
-          <div className={compact ? "absolute bottom-2.5 right-[var(--pad-r)] flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
+          <div className={compact ? "absolute bottom-[var(--pad-b)] right-[var(--pad-r)] flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
             {reactionsOpen && (
               <div
                 className={`absolute z-30 grid w-64 ${compact ? "bottom-0 right-11" : "bottom-11 right-0"} grid-cols-3 gap-1.5 rounded-2xl border border-white/10 bg-stone-900/95 p-2 shadow-2xl backdrop-blur`}
