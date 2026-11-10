@@ -236,6 +236,166 @@ const flags: Record<string, (ctx: CanvasRenderingContext2D, s: number) => void> 
 };
 
 // ---------------------------------------------------------------------------
+// Festive table art: the flag in the middle of a painted, tropical surround
+// with a gold name ribbon, in the style of printed domino table tops.
+// ---------------------------------------------------------------------------
+
+function seeded(seed: number) {
+  let s = seed;
+  return () => (s = (s * 16807) % 2147483647) / 2147483647;
+}
+
+function hibiscus(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, rot: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  for (let i = 0; i < 5; i++) {
+    ctx.rotate((Math.PI * 2) / 5);
+    const g = ctx.createRadialGradient(0, -r * 0.2, r * 0.05, 0, -r * 0.55, r * 0.75);
+    g.addColorStop(0, "#fff");
+    g.addColorStop(0.35, color);
+    g.addColorStop(1, color);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, -r * 0.55, r * 0.42, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = r * 0.03;
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#f5c518";
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function palm(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, rnd: () => number) {
+  ctx.save();
+  ctx.translate(x, y);
+  for (let i = 0; i < 9; i++) {
+    const a = -Math.PI * 0.95 + (i / 8) * Math.PI * 0.9 + (rnd() - 0.5) * 0.15;
+    const len = r * (0.75 + rnd() * 0.35);
+    ctx.save();
+    ctx.rotate(a + Math.PI / 2);
+    const g = ctx.createLinearGradient(0, 0, 0, -len);
+    g.addColorStop(0, "#1f6b2a");
+    g.addColorStop(1, "#58b540");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(len * 0.22, -len * 0.5, 0, -len);
+    ctx.quadraticCurveTo(-len * 0.22, -len * 0.5, 0, 0);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(10,50,15,0.5)";
+    ctx.lineWidth = r * 0.012;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -len * 0.95);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function ribbon(ctx: CanvasRenderingContext2D, s: number, text: string) {
+  const w = s * 0.72, h = s * 0.085, x = (s - w) / 2, y = s * 0.845;
+  // Folded tails
+  ctx.fillStyle = "#9c6f12";
+  for (const dir of [-1, 1]) {
+    ctx.beginPath();
+    const ex = dir < 0 ? x : x + w;
+    ctx.moveTo(ex, y + h * 0.25);
+    ctx.lineTo(ex + dir * s * 0.07, y + h * 0.25);
+    ctx.lineTo(ex + dir * s * 0.045, y + h * 0.75);
+    ctx.lineTo(ex + dir * s * 0.07, y + h * 1.25);
+    ctx.lineTo(ex, y + h * 1.25);
+    ctx.closePath();
+    ctx.fill();
+  }
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, "#f8e08a");
+  g.addColorStop(0.5, "#e2b23a");
+  g.addColorStop(1, "#b9861c");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.quadraticCurveTo(s / 2, y - h * 0.35, x + w, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.quadraticCurveTo(s / 2, y + h * 0.65, x, y + h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#7a560c";
+  ctx.lineWidth = s * 0.004;
+  ctx.stroke();
+
+  ctx.fillStyle = "#1c1408";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let size = h * 0.56;
+  ctx.font = `800 ${size}px "Arial Narrow", "Helvetica Neue", Arial, sans-serif`;
+  const max = w * 0.9;
+  const measured = ctx.measureText(text).width;
+  if (measured > max) {
+    size *= max / measured;
+    ctx.font = `800 ${size}px "Arial Narrow", "Helvetica Neue", Arial, sans-serif`;
+  }
+  ctx.fillText(text, s / 2, y + h * 0.36);
+}
+
+function festive(flag: (ctx: CanvasRenderingContext2D, s: number) => void, label: string, colors: string[], seed: number) {
+  return (ctx: CanvasRenderingContext2D, s: number) => {
+    const rnd = seeded(seed);
+    ctx.fillStyle = "#f4efe6";
+    ctx.fillRect(0, 0, s, s);
+
+    // Paint splashes and speckles in the flag's colors.
+    for (let i = 0; i < 26; i++) {
+      const edge = rnd() * Math.PI * 2;
+      const dist = s * (0.3 + rnd() * 0.25);
+      const x = s / 2 + Math.cos(edge) * dist;
+      const y = s / 2 + Math.sin(edge) * dist;
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.globalAlpha = 0.5 + rnd() * 0.4;
+      ctx.beginPath();
+      ctx.ellipse(x, y, s * (0.03 + rnd() * 0.07), s * (0.008 + rnd() * 0.02), edge, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (let i = 0; i < 260; i++) {
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.globalAlpha = 0.35 + rnd() * 0.5;
+      ctx.beginPath();
+      ctx.arc(rnd() * s, rnd() * s, s * (0.0015 + rnd() * 0.006), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // The flag itself, inset with a soft shadow.
+    const fw = s * 0.62, fh = s * 0.44, fx = (s - fw) / 2, fy = s * 0.24;
+    const off = document.createElement("canvas");
+    off.width = off.height = Math.max(64, Math.round(s * 0.62));
+    flag(off.getContext("2d")!, off.width);
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = s * 0.02;
+    ctx.shadowOffsetY = s * 0.006;
+    ctx.drawImage(off, fx, fy, fw, fh);
+    ctx.restore();
+
+    palm(ctx, s * 0.2, s * 0.24, s * 0.2, rnd);
+    palm(ctx, s * 0.8, s * 0.24, s * 0.2, rnd);
+
+    const spots: [number, number, number][] = [
+      [0.5, 0.2, 0.06], [0.1, 0.5, 0.05], [0.9, 0.52, 0.05], [0.16, 0.74, 0.06],
+      [0.84, 0.76, 0.06], [0.3, 0.14, 0.035], [0.7, 0.13, 0.035], [0.08, 0.3, 0.03], [0.92, 0.3, 0.03],
+    ];
+    spots.forEach(([x, y, r], i) => hibiscus(ctx, x * s, y * s, r * s, colors[i % colors.length], rnd() * 6));
+
+    ribbon(ctx, s, label);
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -261,16 +421,16 @@ export const THEMES: TableTheme[] = [
   { id: "bb-escogido", name: "Escogido Red", group: "Baseball", rim: "#C8102E", shade: 0.1, draw: ballpark("#C8102E", "#ffffff") },
   { id: "bb-aguilas", name: "Águilas Yellow", group: "Baseball", rim: "#FFC72C", shade: 0.1, draw: ballpark("#FFC72C", "#000000") },
 
-  { id: "flag-do", name: "Dominican Republic", group: "Countries", rim: "#002D62", shade: 0.35, draw: flags.dominican },
-  { id: "flag-pr", name: "Puerto Rico", group: "Countries", rim: "#0050F0", shade: 0.35, draw: flags.puertoRico },
-  { id: "flag-us", name: "United States", group: "Countries", rim: "#3C3B6E", shade: 0.35, draw: flags.usa },
-  { id: "flag-mx", name: "Mexico", group: "Countries", rim: "#006847", shade: 0.35, draw: flags.mexico },
-  { id: "flag-cu", name: "Cuba", group: "Countries", rim: "#002A8F", shade: 0.35, draw: flags.cuba },
-  { id: "flag-ve", name: "Venezuela", group: "Countries", rim: "#00247D", shade: 0.35, draw: flags.venezuela },
-  { id: "flag-co", name: "Colombia", group: "Countries", rim: "#003893", shade: 0.35, draw: flags.colombia },
-  { id: "flag-pa", name: "Panama", group: "Countries", rim: "#072357", shade: 0.35, draw: flags.panama },
-  { id: "flag-es", name: "Spain", group: "Countries", rim: "#AA151B", shade: 0.35, draw: flags.spain },
-  { id: "flag-jp", name: "Japan", group: "Countries", rim: "#BC002D", shade: 0.35, draw: flags.japan },
+  { id: "flag-do", name: "Dominican Republic", group: "Countries", rim: "#002D62", shade: 0.2, draw: festive(flags.dominican, "REPÚBLICA DOMINICANA", ["#002D62", "#CE1126"], 101) },
+  { id: "flag-pr", name: "Puerto Rico", group: "Countries", rim: "#0050F0", shade: 0.2, draw: festive(flags.puertoRico, "PUERTO RICO", ["#0050F0", "#ED0000"], 138) },
+  { id: "flag-us", name: "United States", group: "Countries", rim: "#3C3B6E", shade: 0.2, draw: festive(flags.usa, "UNITED STATES", ["#3C3B6E", "#B22234"], 175) },
+  { id: "flag-mx", name: "Mexico", group: "Countries", rim: "#006847", shade: 0.2, draw: festive(flags.mexico, "MÉXICO", ["#006847", "#CE1126"], 212) },
+  { id: "flag-cu", name: "Cuba", group: "Countries", rim: "#002A8F", shade: 0.2, draw: festive(flags.cuba, "CUBA", ["#002A8F", "#CF142B"], 249) },
+  { id: "flag-ve", name: "Venezuela", group: "Countries", rim: "#00247D", shade: 0.2, draw: festive(flags.venezuela, "VENEZUELA", ["#FFCC00", "#00247D", "#CF142B"], 286) },
+  { id: "flag-co", name: "Colombia", group: "Countries", rim: "#003893", shade: 0.2, draw: festive(flags.colombia, "COLOMBIA", ["#FCD116", "#003893", "#CE1126"], 323) },
+  { id: "flag-pa", name: "Panama", group: "Countries", rim: "#072357", shade: 0.2, draw: festive(flags.panama, "PANAMÁ", ["#072357", "#DA121A"], 360) },
+  { id: "flag-es", name: "Spain", group: "Countries", rim: "#AA151B", shade: 0.2, draw: festive(flags.spain, "ESPAÑA", ["#AA151B", "#F1BF00"], 397) },
+  { id: "flag-jp", name: "Japan", group: "Countries", rim: "#BC002D", shade: 0.2, draw: festive(flags.japan, "JAPAN", ["#BC002D", "#d9a3ae"], 434) },
 ];
 
 export const DEFAULT_THEME_ID = "classic";

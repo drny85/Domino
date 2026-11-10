@@ -3,11 +3,14 @@
 import { useMutation } from "convex/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Side, Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
+import type { RackSpec } from "@/components/3d/OpponentRack";
+import { playSfx, unlockAudio } from "@/lib/sound";
 import type { GameState } from "@/lib/types";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
 import { DominoFace } from "./DominoFace";
 import { TargetScoreToggle } from "./TargetScoreToggle";
@@ -131,6 +134,58 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     }
   }
 
+  // Opponents sit around the table in turn order: next player on the right,
+  // partner (or the only opponent) across, previous player on the left.
+  const racks: RackSpec[] = others.map((o) => {
+    const rel = (o.seatIndex - mySeat + seats.length) % seats.length;
+    const side = seats.length === 2 ? "north" : rel === 1 ? "east" : rel === 2 ? "north" : "west";
+    return { side, count: o.tileCount, active: room.status === "playing" && room.currentTurnSeat === o.seatIndex };
+  });
+
+  // Sounds and the big announcement banner, driven by server events.
+  const { muted, toggleMuted } = useSettingsStore();
+  const [banner, setBanner] = useState<{ id: number; text: string } | null>(null);
+  const lastActionAt = room.lastAction?.at ?? 0;
+  const seenAction = useRef(lastActionAt);
+  useEffect(() => {
+    const a = room.lastAction;
+    if (!a || a.at === seenAction.current) return;
+    seenAction.current = a.at;
+    const who = seats.find((x) => x.seatIndex === a.seatIndex);
+    const name = who?.isMe ? "You" : (who?.name ?? "Someone");
+    if (!muted) playSfx(a.kind === "play" ? "place" : a.kind === "draw" ? "draw" : "pass");
+    if (a.kind === "pass") setBanner({ id: a.at, text: `${name} passed` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastActionAt]);
+
+  useEffect(() => {
+    if (!banner) return;
+    const id = setTimeout(() => setBanner(null), 1500);
+    return () => clearTimeout(id);
+  }, [banner]);
+
+  const isMyTurn = !!me?.isMyTurn;
+  const wasMyTurn = useRef(isMyTurn);
+  useEffect(() => {
+    if (isMyTurn && !wasMyTurn.current) {
+      if (!muted) playSfx("turn");
+      navigator.vibrate?.(20);
+    }
+    wasMyTurn.current = isMyTurn;
+  }, [isMyTurn, muted]);
+
+  const finishedRound = room.status === "finished" ? room.round : 0;
+  const announcedRound = useRef(finishedRound);
+  useEffect(() => {
+    if (finishedRound && finishedRound !== announcedRound.current && !muted) {
+      const winner = seats.find((x) => x.seatIndex === room.winnerSeat);
+      const mine = !!winner && !!me && (isTeams ? winner.team === me.team : winner.isMe);
+      setTimeout(() => playSfx(mine ? "win" : "lose"), 350);
+    }
+    announcedRound.current = finishedRound;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedRound]);
+
   const ghosts: GhostSpec[] = selected ? selectedSides.map((side) => ({ side, tile: selected })) : [];
   const lastPlayedId = room.lastAction?.kind === "play" ? (room.lastAction.tileId ?? null) : null;
 
@@ -163,7 +218,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           : `${current?.name ?? "…"}'s turn`;
 
   return (
-    <main className="fixed inset-0 flex flex-col overflow-hidden bg-felt-900">
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-felt-900" onPointerDown={unlockAudio}>
       {/* Top bar */}
       <header className="z-10 flex flex-col gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pt-safe">
         <div className="flex items-center gap-2 whitespace-nowrap text-xs text-stone-300">
@@ -172,7 +227,11 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           </Link>
           <span className="font-mono tracking-widest text-brass-light">{room.code}</span>
           <span className="text-stone-500">·</span>
-          <span>Round {room.round}</span>
+          <span>
+            <span className="hidden min-[400px]:inline">Round </span>
+            <span className="min-[400px]:hidden">R</span>
+            {room.round}
+          </span>
           <span className="text-stone-500">·</span>
           <span>To {room.targetScore}</span>
 
@@ -195,10 +254,13 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               showTeam={isTeams}
             />
           ))}
+          {/* 2v2 deals all 28 tiles, so there is never a boneyard to show. */}
+          {!isTeams && (
           <div className="flex shrink-0 flex-col justify-center rounded-xl border border-white/5 bg-black/25 px-2.5 py-1.5 leading-tight">
             <p className="text-[11px] text-stone-400">{room.mode === "draw" ? "Boneyard" : "Block game"}</p>
             <p className="text-sm font-medium">{room.mode === "draw" ? `${room.boneyardCount} tiles` : "No drawing"}</p>
           </div>
+          )}
         </div>
       </header>
 
@@ -212,6 +274,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             ghosts={ghosts}
             onGhost={(side) => selected && play(selected, side)}
             zoom={zoom}
+            racks={racks}
+            myTurn={isMyTurn}
           />
         </div>
 
@@ -219,6 +283,15 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           {room.openEnds.left !== null && (
             <div className="rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur">
               Ends: <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
+            </div>
+          )}
+          {banner && (
+            <div
+              key={banner.id}
+              role="status"
+              className="toast-in absolute left-1/2 top-24 w-max max-w-[90vw] rounded-2xl bg-black/75 px-6 py-3 text-xl font-bold text-white shadow-xl backdrop-blur"
+            >
+              {banner.text}
             </div>
           )}
           {toast && (
@@ -234,14 +307,25 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
         <div className="absolute bottom-3 right-3 flex flex-col gap-2">
           <button
-            onClick={() => setZoom((z) => Math.max(0.55, z - 0.15))}
+            onClick={() => {
+              unlockAudio();
+              toggleMuted();
+            }}
+            className="size-10 rounded-full bg-black/50 text-base backdrop-blur active:bg-black/70"
+            aria-label={muted ? "Turn sound on" : "Turn sound off"}
+            aria-pressed={!muted}
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
+          <button
+            onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))}
             className="size-10 rounded-full bg-black/50 text-lg backdrop-blur active:bg-black/70"
             aria-label="Zoom in"
           >
             +
           </button>
           <button
-            onClick={() => setZoom((z) => Math.min(1.8, z + 0.15))}
+            onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))}
             className="size-10 rounded-full bg-black/50 text-lg backdrop-blur active:bg-black/70"
             aria-label="Zoom out"
           >
@@ -339,27 +423,37 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 }
 
 function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active: boolean; partner: boolean; showTeam: boolean }) {
+  const low = seat.tileCount <= 2;
   return (
     <div
-      className={`flex shrink-0 items-center gap-2 rounded-xl border px-2.5 py-1.5 ${
+      className={`flex min-w-0 flex-1 flex-col gap-1 rounded-xl border px-2.5 py-1.5 sm:max-w-56 ${
         active ? "turn-pulse border-brass-light bg-brass/15" : "border-white/10 bg-black/40"
       }`}
+      aria-label={`${seat.name}: ${seat.tileCount} ${seat.tileCount === 1 ? "tile" : "tiles"} left, ${seat.score} points`}
     >
-      <span className={`size-2 rounded-full ${seat.isConnected ? "bg-emerald-400" : "bg-stone-500"}`} />
-      <div className="leading-tight">
-        <p className="max-w-24 truncate text-sm font-medium">
-          {seat.name}
-          {showTeam && <span className="ml-1 text-[10px] text-stone-400">{partner ? "partner" : `team ${seat.team === 0 ? "A" : "B"}`}</span>}
-        </p>
-        <p className="text-[11px] text-stone-400">
-          {seat.tileCount} tiles · {seat.score} pts
-        </p>
+      <div className="flex items-center gap-1.5">
+        <span className={`size-2 shrink-0 rounded-full ${seat.isConnected ? "bg-emerald-400" : "bg-stone-500"}`} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{seat.name}</span>
       </div>
-      <div className="flex -space-x-2" aria-hidden>
-        {Array.from({ length: Math.min(seat.tileCount, 5) }).map((_, i) => (
-          <span key={i} className="h-5 w-2.5 rounded-[2px] border border-stone-400/60 bg-stone-200" />
-        ))}
+      <div className="flex items-center gap-1.5" aria-hidden>
+        <span
+          className={`shrink-0 rounded-md px-1.5 py-0.5 text-base font-bold tabular-nums leading-none ${
+            low ? "bg-red-500/30 text-red-100" : "bg-white/10"
+          }`}
+        >
+          {seat.tileCount}
+        </span>
+        {/* One face-down tile per tile they hold. */}
+        <div className="flex min-w-0 flex-wrap gap-[2px]">
+          {Array.from({ length: seat.tileCount }).map((_, i) => (
+            <span key={i} className="h-3 w-[6px] rounded-[2px] border border-stone-400/70 bg-stone-200" />
+          ))}
+        </div>
       </div>
+      <p className="truncate text-[11px] leading-none text-stone-400">
+        {seat.tileCount === 1 ? "1 tile left" : `${seat.tileCount} tiles left`} · {seat.score} pts
+        {showTeam && <> · {partner ? "partner" : seat.team === 0 ? "A" : "B"}</>}
+      </p>
     </div>
   );
 }

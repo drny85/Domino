@@ -8,6 +8,7 @@ import { placeTile } from "../../../convex/lib/rules";
 import { footprint, layoutBoard } from "@/lib/boardLayout";
 import { CameraRig, type Bounds } from "./CameraRig";
 import { DominoTile } from "./DominoTile";
+import { OpponentRack, type RackSpec } from "./OpponentRack";
 import { Table } from "./Table";
 
 export type GhostSpec = { side: Side; tile: Tile };
@@ -19,13 +20,17 @@ type SceneProps = {
   ghosts: GhostSpec[];
   onGhost: (side: Side) => void;
   zoom: number;
+  /** Opponents' hands, shown as face-down tiles on their racks. */
+  racks: RackSpec[];
+  /** Lights the strip on the player's own (south) rail. */
+  myTurn: boolean;
 };
 
 /** Narrower rows on portrait screens so the snake grows downward. */
 function rowLimitFor(aspect: number) {
-  if (aspect < 0.75) return 3.5;
-  if (aspect < 1.25) return 5.5;
-  return 8;
+  if (aspect < 0.8) return 3.5;
+  if (aspect < 1.25) return 4.5;
+  return 6;
 }
 
 function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: SceneProps) {
@@ -50,7 +55,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
 
   const bounds = useMemo<Bounds>(() => {
     const all = [...placed, ...ghostPlacements.map((g) => g.p)];
-    if (all.length === 0) return { minX: -2, maxX: 2, minZ: -2, maxZ: 2 };
+    if (all.length === 0) return { minX: -1, maxX: 1, minZ: -1, maxZ: 1 };
     return all.map(footprint).reduce((acc, f) => ({
       minX: Math.min(acc.minX, f.minX),
       maxX: Math.max(acc.maxX, f.maxX),
@@ -96,8 +101,8 @@ export default function GameScene(props: SceneProps) {
       gl={{ antialias: true, powerPreference: "high-performance" }}
       style={{ touchAction: "none" }}
     >
-      <color attach="background" args={["#08140f"]} />
-      <fog attach="fog" args={["#08140f", 40, 90]} />
+      <color attach="background" args={["#120d0a"]} />
+      <fog attach="fog" args={["#120d0a", 60, 140]} />
       <ambientLight intensity={0.35} />
       <directionalLight position={[6, 14, 8]} intensity={1.6} />
       <directionalLight position={[-8, 10, -6]} intensity={0.4} color="#ffe2b0" />
@@ -110,7 +115,11 @@ export default function GameScene(props: SceneProps) {
         </Environment>
       </Suspense>
       <Table />
-      <ContactShadows position={[0, 0.005, 0]} scale={44} resolution={512} blur={2.2} opacity={0.55} far={2} />
+      <ContactShadows position={[0, 0.005, 0]} scale={18} resolution={1024} blur={1.6} opacity={0.6} far={1.2} />
+      <OpponentRack side="south" count={0} active={props.myTurn} />
+      {props.racks.map((r) => (
+        <OpponentRack key={r.side} {...r} />
+      ))}
       <Board {...props} />
     </Canvas>
   );

@@ -34,7 +34,7 @@ export function ThemeButton({ className = "" }: { className?: string }) {
         aria-label="Change table theme"
       >
         <span className="size-3 rounded-full ring-1 ring-white/40" style={{ background: getTheme(themeId).rim }} />
-        Table
+        <span className="hidden min-[400px]:inline">Table</span>
       </button>
       {open && createPortal(<ThemeSheet onClose={() => setOpen(false)} />, document.body)}
     </>

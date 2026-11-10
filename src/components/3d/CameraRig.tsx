@@ -3,41 +3,54 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRef } from "react";
 import * as THREE from "three";
+import { TABLE_HALF } from "./Table";
 
 export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
+const TILT = THREE.MathUtils.degToRad(30);
+/** Half-width shown by default on portrait screens, so tiles stay readable. */
+const PORTRAIT_HALF_WIDTH = 8;
+
 /**
- * Keeps the whole chain in view. Looks down at a steep angle and picks the
- * distance from the camera's FOV and the screen's aspect ratio, so the same
- * board fits a portrait phone and a widescreen monitor. Eases toward the
- * target each frame, and lets the player zoom with the slider factor.
+ * Sits at the player's side of the table looking down at it, like a seated
+ * player. It shows as much of the table as the screen allows while keeping
+ * tiles readable, and pulls back further only when the chain needs it.
+ * The +/- buttons scale the distance.
  */
 export function CameraRig({ bounds, zoom = 1 }: { bounds: Bounds; zoom?: number }) {
   const { camera, size } = useThree();
-  const target = useRef(new THREE.Vector3());
   const desired = useRef(new THREE.Vector3());
   const look = useRef(new THREE.Vector3());
+  const target = useRef(new THREE.Vector3());
 
   useFrame((_, dt) => {
     const cam = camera as THREE.PerspectiveCamera;
     const aspect = size.width / Math.max(size.height, 1);
-    const margin = 1.6;
-    const halfW = Math.max((bounds.maxX - bounds.minX) / 2 + margin, 3.2);
-    const halfD = Math.max((bounds.maxZ - bounds.minZ) / 2 + margin, 3.2);
+    const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    const tanH = tanV * aspect;
+    const distForWidth = (halfW: number) => halfW / tanH;
+    const distForDepth = (halfD: number) => (halfD * Math.cos(TILT)) / tanV + halfD * Math.sin(TILT);
+
+    // Landscape: the whole table. Portrait: the full width would make tiles
+    // tiny, so show a comfortable slice (both end rails stay in view).
+    const whole = Math.max(distForWidth(TABLE_HALF), distForDepth(TABLE_HALF));
+    const tableDist = aspect >= 1 ? whole : Math.min(whole, distForWidth(PORTRAIT_HALF_WIDTH));
+
+    // The chain must always be fully visible.
+    const margin = 1.4;
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cz = (bounds.minZ + bounds.maxZ) / 2;
+    const chainDist = Math.max(
+      distForWidth((bounds.maxX - bounds.minX) / 2 + margin),
+      distForDepth((bounds.maxZ - bounds.minZ) / 2 + margin),
+    );
 
-    const vFov = THREE.MathUtils.degToRad(cam.fov);
-    const tanV = Math.tan(vFov / 2);
-    const tanH = tanV * aspect;
-    // Tilt from vertical; foreshortening of depth handled by the cos term.
-    const tilt = THREE.MathUtils.degToRad(28);
-    const dist = Math.max(halfW / tanH, (halfD * Math.cos(tilt)) / tanV + halfD * Math.sin(tilt)) * 1.05 * zoom;
+    const dist = Math.max(tableDist, chainDist) * 1.02 * zoom;
+    // Follow the chain a little, but stay anchored to the table.
+    target.current.set(cx * 0.6, 0, cz * 0.6);
+    desired.current.set(target.current.x, Math.cos(TILT) * dist, target.current.z + Math.sin(TILT) * dist);
 
-    target.current.set(cx, 0, cz);
-    desired.current.set(cx, Math.cos(tilt) * dist, cz + Math.sin(tilt) * dist);
-
-    const k = 1 - Math.exp(-dt * 4);
+    const k = 1 - Math.exp(-dt * 3.5);
     cam.position.lerp(desired.current, k);
     look.current.lerp(target.current, k);
     cam.lookAt(look.current);
