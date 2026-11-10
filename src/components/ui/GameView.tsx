@@ -284,7 +284,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           </div>
         )}
 
-        <div className="no-scrollbar flex items-end gap-2 overflow-x-auto px-3 pb-2 pt-5" role="list" aria-label="Your tiles">
+        {/* Centered when the hand fits; scrolls from the first tile when it doesn't. */}
+        <div className="no-scrollbar overflow-x-auto pb-2 pt-5">
+          <div className="mx-auto flex w-max min-w-full items-end justify-center gap-2 px-3" role="list" aria-label="Your tiles">
           {hand.map((t) => {
             const canPlay = playableMap.has(t.id);
             const dim = me?.isMyTurn && !canPlay && room.board.length > 0;
@@ -307,11 +309,12 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             <button
               disabled={pending}
               onClick={onDrawOrPass}
-              className="turn-pulse ml-auto h-16 shrink-0 self-center rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50"
+              className="turn-pulse ml-2 h-16 shrink-0 self-center rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50"
             >
               {me.willDraw ? `Draw (${room.boneyardCount})` : "Pass"}
             </button>
           )}
+          </div>
         </div>
       </footer>
 
