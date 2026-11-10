@@ -9,6 +9,7 @@ import type { Side, Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
 import { playSfx, unlockAudio } from "@/lib/sound";
+import { releaseLandscape, tryLockLandscape, useGameViewport } from "@/lib/useGameViewport";
 import type { GameState } from "@/lib/types";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
@@ -45,6 +46,11 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
   const { selectedTileId, select, toast, showToast, clearToast, pending, setPending } = useGameStore();
   const [zoom, setZoom] = useState(1);
+  const viewport = useGameViewport();
+  const { compact } = viewport;
+  // Phones: ask the browser to rotate on the first tap where it can (Android).
+  const lockTried = useRef(false);
+  useEffect(() => () => releaseLandscape(), []);
   // The 3D scene takes a moment to build; cover the canvas until its first frame.
   const [sceneReady, setSceneReady] = useState(false);
   const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -269,10 +275,32 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         }));
 
   return (
-    <main className="fixed inset-0 flex flex-col overflow-hidden bg-felt-900" onPointerDown={unlockAudio}>
-      {/* Top bar */}
-      <header className="z-10 flex flex-col gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pt-safe">
-        <div className="flex items-center gap-2 whitespace-nowrap text-xs text-stone-300">
+    <main
+      id="game-root"
+      className={`fixed flex flex-col overflow-hidden bg-felt-900 ${viewport.rotate ? "" : "inset-0"}`}
+      // Held upright on a phone: turn the whole game a quarter turn so it plays in landscape.
+      style={
+        viewport.rotate
+          ? { top: 0, left: viewport.height, width: viewport.width, height: viewport.height, transform: "rotate(90deg)", transformOrigin: "top left" }
+          : undefined
+      }
+      onPointerDown={() => {
+        unlockAudio();
+        if (viewport.rotate && !lockTried.current) {
+          lockTried.current = true;
+          void tryLockLandscape();
+        }
+      }}
+    >
+      {/* Top bar. On a phone in landscape it floats over the table. */}
+      <header
+        className={
+          compact
+            ? "pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start gap-2 px-2 pt-1.5 [&>*]:pointer-events-auto"
+            : "z-10 flex flex-col gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pt-safe"
+        }
+      >
+        <div className={`flex items-center gap-2 whitespace-nowrap text-xs text-stone-300 ${compact ? "order-1 rounded-full bg-black/45 pr-3 backdrop-blur" : ""}`}>
           <Link href="/" className="-ml-1 rounded-lg px-2 py-1.5 active:bg-white/10" aria-label="Back to lobby">
             ←
           </Link>
@@ -284,14 +312,24 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             {room.round}
           </span>
 
-          <span className="ml-auto flex items-center gap-2">
-            <ThemeButton className="py-1" />
-          </span>
+          {!compact && (
+            <span className="ml-auto flex items-center gap-2">
+              <ThemeButton className="py-1" />
+            </span>
+          )}
         </div>
-        <ScoreBoard sides={scoreSides} target={room.targetScore} boneyard={!isTeams && room.mode === "draw" ? room.boneyardCount : null} />
+        <div className={compact ? "order-2 mx-auto w-full max-w-sm" : ""}>
+          <ScoreBoard
+            sides={scoreSides}
+            target={room.targetScore}
+            boneyard={!isTeams && room.mode === "draw" ? room.boneyardCount : null}
+            compact={compact}
+          />
+        </div>
+        {compact && <ThemeButton className="order-3 bg-black/45 py-1.5 backdrop-blur" />}
         {/* Two-player games show the opponent inside the tally above. */}
         {isTeams && (
-        <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+        <div className={compact ? "absolute left-2 top-12 flex w-32 flex-col gap-1" : "no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1"}>
           {others.map((o) => (
             <OpponentChip
               key={o.seatIndex}
@@ -306,7 +344,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       </header>
 
       {/* 3D table */}
-      <div className="relative min-h-0 flex-1">
+      <div className={compact ? "absolute inset-0" : "relative min-h-0 flex-1"}>
         <div className="absolute inset-0">
           <GameScene
             board={room.board}
@@ -324,7 +362,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           />
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 top-2 flex flex-col items-center gap-1">
+        <div className={`pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1 ${compact ? "top-16" : "top-2"}`}>
           {activity && (
             <div className="max-w-[80%] truncate rounded-full bg-black/45 px-3 py-1 text-xs text-stone-200 backdrop-blur">{activity}</div>
           )}
@@ -350,7 +388,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
         {room.openEnds.left !== null && (
           <div
-            className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur"
+            className={`pointer-events-none absolute left-2 rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur ${compact ? "bottom-12" : "top-2"}`}
             aria-label={`Open ends ${room.openEnds.left} and ${room.openEnds.right}`}
           >
             Ends <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
@@ -365,36 +403,42 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       </div>
 
       {/* My hand */}
-      <footer className="z-10 bg-gradient-to-t from-black/80 via-black/60 to-black/20 pb-safe">
-        <div className="flex items-center gap-2 px-3 pt-2">
+      <footer
+        className={
+          compact
+            ? "pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col-reverse [&_button]:pointer-events-auto"
+            : "z-10 bg-gradient-to-t from-black/80 via-black/60 to-black/20 pb-safe"
+        }
+      >
+        <div className={`flex items-center gap-2 px-3 ${compact ? "pb-1.5" : "pt-2"}`}>
           <span
             className={`size-2.5 rounded-full ${me?.isMyTurn ? "turn-pulse bg-brass-light" : "bg-stone-600"}`}
             aria-hidden
           />
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold">{turnText}</p>
+          <p className={`min-w-0 truncate text-sm font-semibold ${compact ? "mr-auto rounded-full bg-black/45 px-3 py-1 backdrop-blur" : "flex-1"}`}>{turnText}</p>
 <div className="flex shrink-0 gap-1">
             <button
               onClick={() => {
                 unlockAudio();
                 toggleMuted();
               }}
-              className="size-9 rounded-full bg-white/10 text-sm active:bg-white/20"
+              className={`size-9 rounded-full text-sm ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`}
               aria-label={muted ? "Turn sound on" : "Turn sound off"}
               aria-pressed={!muted}
             >
               {muted ? "🔇" : "🔊"}
             </button>
-            <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))} className="size-9 rounded-full bg-white/10 text-lg leading-none active:bg-white/20" aria-label="Zoom in">
+            <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.2))} className={`size-9 rounded-full text-lg leading-none ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`} aria-label="Zoom in">
               +
             </button>
-            <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))} className="size-9 rounded-full bg-white/10 text-lg leading-none active:bg-white/20" aria-label="Zoom out">
+            <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))} className={`size-9 rounded-full text-lg leading-none ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`} aria-label="Zoom out">
               −
             </button>
           </div>
         </div>
 
         {selected && selectedSides.length === 2 && (
-          <div className="flex gap-2 px-3 pt-2">
+          <div className={`flex gap-2 px-3 ${compact ? "mx-auto w-full max-w-md pb-1" : "pt-2"}`}>
             {(["left", "right"] as const).map((side) => (
               <button
                 key={side}
@@ -416,7 +460,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             </li>
           ))}
         </ul>
-        <div className="flex min-h-3 justify-center px-3 pb-2 pt-2">
+        <div className={`flex justify-center px-3 ${compact ? "pb-1" : "min-h-3 pb-2 pt-2"}`}>
           {me?.canDrawOrPass && (
             <button
               disabled={pending}
@@ -461,7 +505,17 @@ type ScoreSide = {
 };
 
 /** Match tally: both scores, how close each is to the target, and who leads. */
-function ScoreBoard({ sides, target, boneyard }: { sides: ScoreSide[]; target: number; boneyard: number | null }) {
+function ScoreBoard({
+  sides,
+  target,
+  boneyard,
+  compact = false,
+}: {
+  sides: ScoreSide[];
+  target: number;
+  boneyard: number | null;
+  compact?: boolean;
+}) {
   if (sides.length < 2) return null;
   const [a, b] = sides;
   const lead = a.score - b.score;
@@ -469,7 +523,7 @@ function ScoreBoard({ sides, target, boneyard }: { sides: ScoreSide[]; target: n
   const side = (s: ScoreSide, leading: boolean, align: "left" | "right") => (
     <div className={`min-w-0 flex-1 ${align === "right" ? "text-right" : ""}`}>
       <div className={`flex items-baseline gap-2 ${align === "right" ? "flex-row-reverse" : ""}`}>
-        <span className={`text-2xl font-bold tabular-nums leading-none ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
+        <span className={`font-bold tabular-nums leading-none ${compact ? "text-lg" : "text-2xl"} ${leading ? "text-brass-light" : "text-white"}`}>{s.score}</span>
         <span className={`min-w-0 truncate text-xs ${leading ? "font-semibold text-brass-light" : "text-stone-300"}`}>
           {leading && <span aria-hidden>★ </span>}
           {s.label}
@@ -497,13 +551,16 @@ function ScoreBoard({ sides, target, boneyard }: { sides: ScoreSide[]; target: n
   );
   return (
     <section
-      className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/35 px-3 py-2"
+      className={`flex items-center gap-3 rounded-xl border border-white/10 px-3 ${compact ? "bg-black/55 py-1 backdrop-blur" : "bg-black/35 py-2"}`}
       aria-label={`Score: ${a.label} ${a.score}, ${b.label} ${b.score}, playing to ${target}. ${status}.`}
     >
       {side(a, lead > 0, "left")}
       <div className="shrink-0 text-center leading-tight">
-        <p className="text-[10px] uppercase tracking-wide text-stone-400">First to</p>
-        <p className="text-sm font-bold text-white">{target}</p>
+        {!compact && <p className="text-[10px] uppercase tracking-wide text-stone-400">First to</p>}
+        <p className="text-sm font-bold text-white">
+          {compact && <span className="text-[10px] font-normal text-stone-400">to </span>}
+          {target}
+        </p>
         <p className={`text-[10px] ${lead === 0 ? "text-stone-400" : "text-brass-light"}`}>{lead === 0 ? "Tied" : `+${Math.abs(lead)}`}</p>
         {boneyard !== null && <p className="text-[10px] text-stone-400">Boneyard {boneyard}</p>}
       </div>

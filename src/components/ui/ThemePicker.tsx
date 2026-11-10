@@ -52,7 +52,8 @@ export function ThemeButton({ className = "" }: { className?: string }) {
         <span className="size-3 rounded-full ring-1 ring-white/40" style={{ background: getTheme(themeId).rim }} />
         <span className="hidden min-[400px]:inline">Table</span>
       </button>
-      {open && createPortal(<ThemeSheet onClose={() => setOpen(false)} />, document.body)}
+      {/* Inside the game screen when there is one, so the sheet turns with it on phones. */}
+      {open && createPortal(<ThemeSheet onClose={() => setOpen(false)} />, document.getElementById("game-root") ?? document.body)}
     </>
   );
 }
@@ -73,7 +74,7 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-label="Table and background"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[80dvh] w-full overflow-y-auto rounded-t-3xl bg-stone-900 p-4 pb-safe shadow-2xl sm:max-w-lg sm:rounded-3xl"
+        className="max-h-[85%] w-full overflow-y-auto rounded-t-3xl bg-stone-900 p-4 pb-safe shadow-2xl sm:max-w-lg sm:rounded-3xl"
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         <div className="mb-3 flex items-center justify-between">

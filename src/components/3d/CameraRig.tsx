@@ -13,6 +13,8 @@ const SIN = Math.sin(TILT);
 const COS = Math.cos(TILT);
 /** Portrait screens never zoom in past this half-width, so a short chain is not huge. */
 const PORTRAIT_MIN_HALF_WIDTH = 4.6;
+/** Canvases shorter than this (a phone on its side) also use the close framing. */
+const CLOSE_MAX_HEIGHT = 520;
 
 type Point = [x: number, y: number, z: number];
 
@@ -35,6 +37,8 @@ export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds;
     const tanH = tanV * aspect;
 
     const portrait = aspect < 1;
+    // Phones, upright or on their side, come in close; big screens show the whole table.
+    const close = portrait || size.height < CLOSE_MAX_HEIGHT;
     const hand = handLayout(handCount, portrait);
     const handHalf = hand.halfWidth + 0.35;
     const handTop = 2.1 * hand.scale + 0.8;
@@ -43,7 +47,7 @@ export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds;
     const cz = (bounds.minZ + bounds.maxZ) / 2;
     // Follow the chain a little, but stay anchored to the table. Portrait
     // leans toward the player, where the chain and the rack both are.
-    target.current.set(cx * 0.6, 0, portrait ? Math.max(cz * 0.6, 0) + 3 : cz * 0.6 + 1);
+    target.current.set(cx * 0.6, 0, close ? Math.max(cz * 0.6, 0) + 3 : cz * 0.6 + 1);
     const tx = target.current.x;
     const tz = target.current.z;
 
@@ -56,20 +60,21 @@ export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds;
       return Math.max(Math.abs(rx) / tanH, Math.abs(up) / tanV) + along;
     };
 
-    const margin = portrait ? 0.9 : 1.4;
+    const margin = close ? 0.9 : 1.4;
     const points: Point[] = [
       // The player's hand, standing in the near rack.
       [-handHalf, 0.6, RACK_Z],
       [handHalf, 0.6, RACK_Z],
       [0, handTop, RACK_Z],
-      [0, 0.4, TABLE_HALF - 0.6],
+      // The near edge, plus room for the bar that floats over it on phones.
+      [0, 0.4, TABLE_HALF + (close && !portrait ? 1.6 : 0.2)],
       // The chain.
       [bounds.minX - margin, 0, bounds.minZ - margin],
       [bounds.maxX + margin, 0, bounds.minZ - margin],
       [bounds.minX - margin, 0, bounds.maxZ + margin],
       [bounds.maxX + margin, 0, bounds.maxZ + margin],
     ];
-    if (portrait) {
+    if (close) {
       points.push([tx - PORTRAIT_MIN_HALF_WIDTH, 0, tz], [tx + PORTRAIT_MIN_HALF_WIDTH, 0, tz]);
     } else {
       // Room for the far rack and the whole table, corner blocks included.

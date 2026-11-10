@@ -123,6 +123,8 @@ export default function GameScene(props: SceneProps) {
     <Canvas
       shadows
       dpr={[1, 2]}
+      // Measure the layout box, not the on-screen box: the game screen may be CSS-rotated.
+      resize={{ offsetSize: true }}
       // A tight depth range keeps close surfaces from shimmering at a distance.
       camera={{ fov: 42, position: [0, 14, 8], near: 2, far: 160 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
