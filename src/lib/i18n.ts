@@ -213,6 +213,8 @@ export const ES: Record<string, string> = {
   "includes a +{n} bonus": "incluye un bono de +{n}",
   "{n} pips left": "{n} puntos en mano",
   "House rules for the next round": "Reglas para la próxima mano",
+  "Rules changed": "Cambiaron las reglas",
+  "New rules for the next round": "Reglas nuevas para la próxima mano",
   Rematch: "Revancha",
   "Next round": "Siguiente mano",
   "Waiting for the host to start the rematch…": "Esperando a que el anfitrión empiece la revancha…",

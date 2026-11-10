@@ -230,6 +230,28 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastActionAt]);
 
+  // Rules the host changed mid-match, spelled out for everyone.
+  const ruleText = (c: { key: string; value: string }) =>
+    c.key === "target"
+      ? `${t("Points to win")}: ${c.value}`
+      : c.key === "timer"
+        ? `${t("Turn timer")}: ${c.value === "0" ? t("Off") : `${c.value}s`}`
+        : c.key === "bonuses"
+          ? `${t("Bonuses")}: ${c.value === "on" ? t("On") : t("Off")}`
+          : `${t("CPU level")}: ${t(c.value === "easy" ? "Easy" : c.value === "hard" ? "Hard" : "Normal")}`;
+  const rulesAt = room.rulesChange?.at ?? 0;
+  const seenRules = useRef(rulesAt);
+  const [rulesNotice, setRulesNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const r = room.rulesChange;
+    if (!r || r.at === seenRules.current) return;
+    seenRules.current = r.at;
+    setRulesNotice(`${t("Rules changed")}: ${r.changes.map(ruleText).join(" · ")}`);
+    const id = setTimeout(() => setRulesNotice(null), 7000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rulesAt]);
+
   const bonusAt = room.bonusEvent?.at ?? 0;
   const seenBonus = useRef(bonusAt);
   useEffect(() => {
@@ -520,6 +542,14 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           </div>
         )}
         <ReactionBubbles seats={seats} mySeat={mySeat} muted={muted} />
+        {rulesNotice && (
+          <div
+            role="alert"
+            className="bubble-in pointer-events-none absolute left-1/2 top-[38%] z-30 w-max max-w-[90%] -translate-x-1/2 rounded-2xl border border-brass/60 bg-stone-900/95 px-5 py-3 text-center text-sm font-semibold text-brass-light shadow-2xl"
+          >
+            {rulesNotice}
+          </div>
+        )}
         <FullscreenTip />
         {!sceneReady && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-felt-900">
@@ -883,6 +913,22 @@ function RoundOverSheet({
           ))}
         </ul>
 
+        {room.rulesChange && !room.rulesChange.applied && (
+          <p className="mt-3 rounded-xl border border-brass/40 bg-brass/10 px-3 py-2 text-center text-xs text-brass-light" role="status">
+            {t("New rules for the next round")}:{" "}
+            {room.rulesChange.changes
+              .map((c) =>
+                c.key === "target"
+                  ? `${t("Points to win")} ${c.value}`
+                  : c.key === "timer"
+                    ? `${t("Turn timer")} ${c.value === "0" ? t("Off") : `${c.value}s`}`
+                    : c.key === "bonuses"
+                      ? `${t("Bonuses")} ${c.value === "on" ? t("On") : t("Off")}`
+                      : `${t("CPU level")} ${t(c.value === "easy" ? "Easy" : c.value === "hard" ? "Hard" : "Normal")}`,
+              )
+              .join(" · ")}
+          </p>
+        )}
         {(me?.isHost || (spectator?.isHost && room.matchOver)) && (
           <details className="mt-3 rounded-xl bg-white/5 px-3 py-2">
             <summary className="cursor-pointer text-sm text-stone-300">{t("House rules for the next round")}</summary>

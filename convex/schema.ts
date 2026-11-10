@@ -60,6 +60,15 @@ export default defineSchema({
     turnDeadline: v.optional(v.number()),
     // Per seat: numbers that player could not match this round (public knowledge).
     voids: v.optional(v.array(v.array(v.number()))),
+    // Rules the host changed after the match began, announced to every player.
+    rulesChange: v.optional(
+      v.object({
+        at: v.number(),
+        changes: v.array(v.object({ key: v.string(), value: v.string() })),
+        // Set once the round that uses the new rules has been dealt.
+        applied: v.optional(v.boolean()),
+      }),
+    ),
     lastRound: v.optional(
       v.object({ points: v.number(), bonus: v.number(), bonusKind: v.optional(v.string()) }),
     ),

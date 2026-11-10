@@ -388,3 +388,31 @@ describe("watching a CPU match", () => {
     vi.useRealTimers();
   });
 });
+
+describe("rule changes during a match", () => {
+  it("are recorded for every player and repeated when the next round is dealt", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    // Before the first deal nothing is announced.
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!.room.rulesChange).toBeNull();
+    await t.finishAllScheduledFunctions(vi.runAllTimers); // the round plays itself out
+
+    await t.mutation(api.games.setTargetScore, { roomId, sessionId: S(0), targetScore: 100 });
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 30, bonuses: true });
+    const guest = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(guest.room.rulesChange?.changes).toEqual([
+      { key: "target", value: "100" },
+      { key: "timer", value: "30" },
+    ]);
+    expect(guest.room.rulesChange?.applied).toBeUndefined();
+    const at = guest.room.rulesChange!.at;
+    vi.advanceTimersByTime(1000);
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const next = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(next.room.rulesChange?.applied).toBe(true);
+    expect(next.room.rulesChange!.at).toBeGreaterThan(at);
+    vi.useRealTimers();
+  });
+});

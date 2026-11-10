@@ -65,6 +65,18 @@ function cleanAvatar(avatar: string | undefined): string | undefined {
   return avatar !== undefined && (AVATARS as readonly string[]).includes(avatar) ? avatar : undefined;
 }
 
+/**
+ * Notes a rule the host changed once the match is under way, so every player
+ * is told. Changes made before the first deal are visible in the lobby anyway.
+ */
+function withRuleChange(room: Doc<"rooms">, changes: { key: string; value: string }[]) {
+  if (room.status === "waiting" || changes.length === 0) return {};
+  // Keep earlier changes from the same break between rounds, newest value per rule.
+  const earlier = room.rulesChange && !room.rulesChange.applied ? room.rulesChange.changes : [];
+  const merged = [...earlier.filter((c) => !changes.some((n) => n.key === c.key)), ...changes];
+  return { rulesChange: { at: Date.now(), changes: merged } };
+}
+
 function assertSessionId(sessionId: string) {
   if (sessionId.length < 8 || sessionId.length > 128 || sessionId.startsWith("cpu:")) {
     throw new Error("Invalid session");
@@ -463,7 +475,8 @@ export const setTargetScore = mutation({
     const room = await getRoomOrThrow(ctx, roomId);
     if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the target");
     if (room.status === "playing") throw new Error("Change the target between rounds");
-    await ctx.db.patch(roomId, { targetScore });
+    if ((room.targetScore ?? DEFAULT_TARGET_SCORE) === targetScore) return;
+    await ctx.db.patch(roomId, { targetScore, ...withRuleChange(room, [{ key: "target", value: String(targetScore) }]) });
   },
 });
 
@@ -480,10 +493,15 @@ export const setRoomOptions = mutation({
     const room = await getRoomOrThrow(ctx, roomId);
     if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the rules");
     if (room.status === "playing") throw new Error("Change the rules between rounds");
+    const changes: { key: string; value: string }[] = [];
+    if (turnSeconds !== undefined && turnSeconds !== (room.turnSeconds ?? 0)) changes.push({ key: "timer", value: String(turnSeconds) });
+    if (bonuses !== undefined && bonuses !== !!room.bonuses) changes.push({ key: "bonuses", value: bonuses ? "on" : "off" });
+    if (cpuLevel !== undefined && cpuLevel !== (room.cpuLevel ?? "normal")) changes.push({ key: "cpu", value: cpuLevel });
     await ctx.db.patch(roomId, {
       ...(turnSeconds !== undefined ? { turnSeconds } : {}),
       ...(bonuses !== undefined ? { bonuses } : {}),
       ...(cpuLevel !== undefined ? { cpuLevel } : {}),
+      ...withRuleChange(room, changes),
     });
   },
 });
@@ -593,6 +611,10 @@ async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
     turnDeadline: undefined,
     voids: players.map(() => []),
     bonusEvent: undefined,
+    // Remind everyone of changed rules as the round they apply to is dealt.
+    ...(room.rulesChange && !room.rulesChange.applied
+      ? { rulesChange: { ...room.rulesChange, at: Date.now(), applied: true } }
+      : {}),
   });
   await scheduleNext(ctx, roomId);
 }
@@ -808,6 +830,7 @@ export const getGameState = query({
         cpuLevel: room.cpuLevel ?? "normal",
         lastRound: finished ? (room.lastRound ?? null) : null,
         bonusEvent: room.bonusEvent ?? null,
+        rulesChange: room.rulesChange ?? null,
       },
       // A watched CPU match has no seat for the viewer; they see the south hand instead.
       spectator:
