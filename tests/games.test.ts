@@ -403,10 +403,16 @@ describe("rule changes during a match", () => {
     await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 30, bonuses: true });
     const guest = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
     expect(guest.room.rulesChange?.changes).toEqual([
-      { key: "target", value: "100" },
-      { key: "timer", value: "30" },
+      { key: "target", value: "100", from: "200" },
+      { key: "timer", value: "30", from: "0" },
     ]);
     expect(guest.room.rulesChange?.applied).toBeUndefined();
+    // Putting a rule back to what it was drops it from the announcement.
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 0 });
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!.room.rulesChange?.changes).toEqual([
+      { key: "target", value: "100", from: "200" },
+    ]);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 30 });
     const at = guest.room.rulesChange!.at;
     vi.advanceTimersByTime(1000);
     await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });

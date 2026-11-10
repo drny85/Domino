@@ -231,14 +231,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   }, [lastActionAt]);
 
   // Rules the host changed mid-match, spelled out for everyone.
-  const ruleText = (c: { key: string; value: string }) =>
-    c.key === "target"
-      ? `${t("Points to win")}: ${c.value}`
-      : c.key === "timer"
-        ? `${t("Turn timer")}: ${c.value === "0" ? t("Off") : `${c.value}s`}`
-        : c.key === "bonuses"
-          ? `${t("Bonuses")}: ${c.value === "on" ? t("On") : t("Off")}`
-          : `${t("CPU level")}: ${t(c.value === "easy" ? "Easy" : c.value === "hard" ? "Hard" : "Normal")}`;
+  const ruleText = (c: RuleChange) => describeRule(t, c, ": ");
   const rulesAt = room.rulesChange?.at ?? 0;
   const seenRules = useRef(rulesAt);
   const [rulesNotice, setRulesNotice] = useState<string | null>(null);
@@ -817,6 +810,24 @@ function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active:
   );
 }
 
+type RuleChange = { key: string; value: string; from?: string };
+
+/** "Turn timer: 20s → 30s". The old value is left out when it is not known. */
+function describeRule(t: ReturnType<typeof useT>, c: RuleChange, sep: string) {
+  const val = (v: string) =>
+    c.key === "target"
+      ? v
+      : c.key === "timer"
+        ? v === "0" ? t("Off") : `${v}s`
+        : c.key === "bonuses"
+          ? t(v === "on" ? "On" : "Off")
+          : t(v === "easy" ? "Easy" : v === "hard" ? "Hard" : "Normal");
+  const label = t(
+    c.key === "target" ? "Points to win" : c.key === "timer" ? "Turn timer" : c.key === "bonuses" ? "Bonuses" : "CPU level",
+  );
+  return `${label}${sep}${c.from !== undefined ? `${val(c.from)} → ` : ""}${val(c.value)}`;
+}
+
 function RoundOverSheet({
   state,
   seats,
@@ -917,15 +928,7 @@ function RoundOverSheet({
           <p className="mt-3 rounded-xl border border-brass/40 bg-brass/10 px-3 py-2 text-center text-xs text-brass-light" role="status">
             {t("New rules for the next round")}:{" "}
             {room.rulesChange.changes
-              .map((c) =>
-                c.key === "target"
-                  ? `${t("Points to win")} ${c.value}`
-                  : c.key === "timer"
-                    ? `${t("Turn timer")} ${c.value === "0" ? t("Off") : `${c.value}s`}`
-                    : c.key === "bonuses"
-                      ? `${t("Bonuses")} ${c.value === "on" ? t("On") : t("Off")}`
-                      : `${t("CPU level")} ${t(c.value === "easy" ? "Easy" : c.value === "hard" ? "Hard" : "Normal")}`,
-              )
+              .map((c) => describeRule(t, c, " "))
               .join(" · ")}
           </p>
         )}

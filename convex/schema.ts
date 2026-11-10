@@ -64,7 +64,7 @@ export default defineSchema({
     rulesChange: v.optional(
       v.object({
         at: v.number(),
-        changes: v.array(v.object({ key: v.string(), value: v.string() })),
+        changes: v.array(v.object({ key: v.string(), value: v.string(), from: v.optional(v.string()) })),
         // Set once the round that uses the new rules has been dealt.
         applied: v.optional(v.boolean()),
       }),
