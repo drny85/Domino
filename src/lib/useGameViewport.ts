@@ -70,3 +70,17 @@ export function releaseLandscape() {
     // Nothing to release.
   }
 }
+
+/** Enters or leaves full screen (hides the browser bars where the browser allows it). */
+export async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      const orientation = screen.orientation as LockableOrientation | undefined;
+      await orientation?.lock?.("landscape").catch(() => {});
+    }
+  } catch {
+    // Not allowed here.
+  }
+}

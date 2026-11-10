@@ -10,7 +10,7 @@ import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
 import { useT } from "@/lib/i18n";
 import { playSfx, unlockAudio } from "@/lib/sound";
-import { releaseLandscape, tryLockLandscape, useGameViewport } from "@/lib/useGameViewport";
+import { releaseLandscape, toggleFullscreen, tryLockLandscape, useGameViewport } from "@/lib/useGameViewport";
 import type { GameState } from "@/lib/types";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
@@ -61,6 +61,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   const { compact } = viewport;
   // Phones: ask the browser to rotate on the first tap where it can (Android).
   const lockTried = useRef(false);
+  const [canFullscreen, setCanFullscreen] = useState(false);
+  useEffect(() => setCanFullscreen(!!document.documentElement.requestFullscreen && document.fullscreenEnabled !== false), []);
   useEffect(() => () => releaseLandscape(), []);
   // The 3D scene takes a moment to build; cover the canvas until its first frame.
   const [sceneReady, setSceneReady] = useState(false);
@@ -317,6 +319,24 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           : current && !current.isConnected
             ? t("{name} is away: playing for them…", { name: current.name })
             : t("{name}'s turn", { name: current?.name ?? "…" });
+  // Nothing has happened for a while: say plainly whose turn it is.
+  const turnStamp = `${room.status}:${room.round}:${room.currentTurnSeat}:${room.board.length}:${room.lastAction?.at ?? 0}`;
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    setIdle(false);
+    if (room.status !== "playing") return;
+    const id = setTimeout(() => {
+      setIdle(true);
+      if (isMyTurn) buzz(30);
+    }, IDLE_HINT_MS);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnStamp]);
+  const idleText = !idle || room.status !== "playing" || !sceneReady
+    ? null
+    : isMyTurn
+      ? t("It's your turn!")
+      : t("Waiting for {name}…", { name: current?.name ?? "…" });
   const secondsLeft = useCountdown(room.status === "playing" ? room.turnDeadline : null);
 
   // The tally: my side first, then the other side (teams in 2v2).
@@ -347,13 +367,28 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       className={`fixed flex flex-col overflow-hidden bg-felt-900 ${viewport.rotate ? "" : "inset-0"}`}
       // Held upright on a phone: turn the whole game a quarter turn so it plays in landscape.
       style={
+        // Side padding clears notches and rounded corners. Turned a quarter, the
+        // game's left edge is the phone's top edge and its right edge the bottom.
         viewport.rotate
-          ? { top: 0, left: viewport.height, width: viewport.width, height: viewport.height, transform: "rotate(90deg)", transformOrigin: "top left" }
-          : undefined
+          ? ({
+              top: 0,
+              left: viewport.height,
+              width: viewport.width,
+              height: viewport.height,
+              transform: "rotate(90deg)",
+              transformOrigin: "top left",
+              "--pad-l": "max(20px, env(safe-area-inset-top))",
+              "--pad-r": "max(20px, env(safe-area-inset-bottom))",
+            } as React.CSSProperties)
+          : ({
+              "--pad-l": "max(20px, env(safe-area-inset-left))",
+              "--pad-r": "max(20px, env(safe-area-inset-right))",
+            } as React.CSSProperties)
       }
       onPointerDown={() => {
         unlockAudio();
-        if (viewport.rotate && !lockTried.current) {
+        // On phones the first tap asks for full screen, which hides the browser bars where allowed.
+        if (viewport.compact && navigator.maxTouchPoints > 0 && !lockTried.current) {
           lockTried.current = true;
           void tryLockLandscape();
         }
@@ -363,7 +398,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       <header
         className={
           compact
-            ? "pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start gap-2 px-2 pt-1.5 [&>*]:pointer-events-auto"
+            ? "pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start gap-2 pl-[var(--pad-l)] pr-[var(--pad-r)] pt-2 [&>*]:pointer-events-auto"
             : "z-10 flex flex-col gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pt-safe"
         }
       >
@@ -402,7 +437,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         )}
         {/* Two-player games show the opponent inside the tally above. */}
         {isTeams && (
-        <div className={compact ? "absolute left-2 top-12 flex w-32 flex-col gap-1" : "no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1"}>
+        <div className={compact ? "absolute left-[var(--pad-l)] top-12 flex w-32 flex-col gap-1" : "no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1"}>
           {others.filter((o) => o.seatIndex !== mySeat).map((o) => (
             <OpponentChip
               key={o.seatIndex}
@@ -462,13 +497,30 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
         {room.openEnds.left !== null && (
           <div
-            className={`pointer-events-none absolute left-2 rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur ${compact ? "bottom-12" : "top-2"}`}
+            className={`pointer-events-none absolute rounded-full bg-black/50 px-3 py-1 text-xs text-stone-200 backdrop-blur ${compact ? "bottom-14 left-[var(--pad-l)]" : "left-2 top-2"}`}
             aria-label={t("Open ends {left} and {right}", { left: room.openEnds.left, right: room.openEnds.right ?? "" })}
           >
             {t("Ends")} <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
           </div>
         )}
+        {idleText && !banner && (
+          <div
+            key={turnStamp}
+            role="status"
+            className={`bubble-in pointer-events-none absolute z-10 w-max max-w-[80%] rounded-2xl px-4 py-2 text-base font-bold shadow-xl backdrop-blur ${
+              isMyTurn ? "turn-pulse bg-brass text-stone-900" : "bg-black/70 text-white"
+            } ${
+              { south: "bottom-[32%] left-1/2 -translate-x-1/2", north: "top-[24%] left-1/2 -translate-x-1/2", east: "top-[45%] right-[76px]", west: "top-[45%] left-[6%]" }[
+                sideOf(room.currentTurnSeat)
+              ]
+            }`}
+          >
+            {current?.avatar && !isMyTurn && <span aria-hidden>{current.avatar} </span>}
+            {idleText}
+          </div>
+        )}
         <ReactionBubbles seats={seats} mySeat={mySeat} muted={muted} />
+        <FullscreenTip />
         {!sceneReady && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-felt-900">
             <div className="size-8 animate-spin rounded-full border-2 border-white/20 border-t-brass" />
@@ -485,7 +537,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             : "z-10 bg-gradient-to-t from-black/80 via-black/60 to-black/20 pb-safe"
         }
       >
-        <div className={`flex items-center gap-2 px-3 ${compact ? "pb-1.5" : "pt-2"}`}>
+        <div className={`flex items-center gap-2 ${compact ? "pb-2.5 pl-[var(--pad-l)] pr-[var(--pad-r)]" : "px-3 pt-2"}`}>
           <span
             className={`size-2.5 rounded-full ${me?.isMyTurn ? "turn-pulse bg-brass-light" : "bg-stone-600"}`}
             aria-hidden
@@ -498,7 +550,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               </span>
             )}
           </p>
-          <div className={compact ? "absolute bottom-1.5 right-2 flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
+          <div className={compact ? "absolute bottom-2.5 right-[var(--pad-r)] flex flex-col gap-1.5" : "relative flex shrink-0 gap-1"}>
             {reactionsOpen && (
               <div
                 className={`absolute z-30 grid w-64 ${compact ? "bottom-0 right-11" : "bottom-11 right-0"} grid-cols-3 gap-1.5 rounded-2xl border border-white/10 bg-stone-900/95 p-2 shadow-2xl backdrop-blur`}
@@ -549,6 +601,15 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))} className={`size-9 rounded-full text-lg leading-none ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`} aria-label={t("Zoom out")}>
               −
             </button>
+            {canFullscreen && (
+              <button
+                onClick={() => void toggleFullscreen()}
+                className={`size-9 rounded-full text-sm ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`}
+                aria-label={t("Full screen")}
+              >
+                ⛶
+              </button>
+            )}
           </div>
         </div>
 
@@ -575,7 +636,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             </li>
           ))}
         </ul>
-        <div className={compact ? "flex px-3 pb-1.5" : "flex min-h-3 justify-center px-3 pb-2 pt-2"}>
+        <div className={compact ? "flex pb-1.5 pl-[var(--pad-l)]" : "flex min-h-3 justify-center px-3 pb-2 pt-2"}>
           {me?.canDrawOrPass && (
             <button
               disabled={pending}
@@ -867,6 +928,8 @@ function useCountdown(deadline: number | null): number | null {
 }
 
 const BUBBLE_MS = 3200;
+/** Quiet time on a turn before the game points out whose turn it is. */
+const IDLE_HINT_MS = 6000;
 
 /** Speech bubbles for reactions, shown on the side of the table where each player sits. */
 function ReactionBubbles({ seats, mySeat, muted }: { seats: Seat[]; mySeat: number; muted: boolean }) {
@@ -920,4 +983,46 @@ function buzz(ms: number) {
   const nav = navigator as Navigator & { userActivation?: { hasBeenActive: boolean } };
   if (nav.userActivation && !nav.userActivation.hasBeenActive) return;
   nav.vibrate?.(ms);
+}
+
+const TIP_KEY = "domino.fullscreenTip";
+
+/**
+ * iPhones never let a web page hide Safari's bars. The only way to play full
+ * screen there is from the home screen, so say so once.
+ */
+function FullscreenTip() {
+  const t = useT();
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const ua = navigator.userAgent;
+    const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const installed = window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    let dismissed = false;
+    try {
+      dismissed = localStorage.getItem(TIP_KEY) === "1";
+    } catch {
+      /* private mode */
+    }
+    setShow(ios && !installed && !dismissed);
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="absolute left-1/2 top-14 z-20 flex w-[min(92%,26rem)] -translate-x-1/2 items-start gap-3 rounded-2xl border border-white/10 bg-stone-900/95 px-4 py-3 text-sm text-stone-200 shadow-2xl">
+      <p className="min-w-0 flex-1">{t("For full screen without the browser bars: tap Share, then “Add to Home Screen”, and open the game from that icon.")}</p>
+      <button
+        onClick={() => {
+          setShow(false);
+          try {
+            localStorage.setItem(TIP_KEY, "1");
+          } catch {
+            /* private mode */
+          }
+        }}
+        className="shrink-0 rounded-full bg-brass px-3 py-1.5 text-xs font-semibold text-stone-900"
+      >
+        {t("Got it")}
+      </button>
+    </div>
+  );
 }
