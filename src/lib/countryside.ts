@@ -1,5 +1,5 @@
 /**
- * Ground and sky for the two countryside surroundings. The solid objects
+ * Ground and sky for the countryside surroundings. The solid objects
  * (house, animals, fences) live in components/3d/Countryside.tsx; the spots
  * below line up with them. Ground coordinates are in table units: the square
  * is 90 wide, x to the right and z toward the player.
@@ -16,16 +16,9 @@ function rng(seed: number) {
 
 /** Where the solid objects stand, shared with the 3D side. */
 export const YARD = {
-  bright: {
-    house: { x: -27, z: -19, turn: 0.5 },
-    tree: { x: 38, z: -30 },
-    trough: { x: -27, z: 8 },
-  },
-  ranch: {
-    house: { x: 27, z: -19, turn: -0.5 },
-    palm: { x: -29, z: -20 },
-    hay: { x: 27, z: 11 },
-  },
+  house: { x: -27, z: -19, turn: 0.5 },
+  tree: { x: 38, z: -30 },
+  trough: { x: -27, z: 8 },
 } as const;
 
 function blob(ctx: Ctx, cx: number, cy: number, r: number, seed: number, wobble = 0.18) {
@@ -149,7 +142,7 @@ function skyAndHills(ctx: Ctx, w: number, h: number, top: string, bottom: string
   });
 }
 
-/** Option A: a bright midday yard in front of a painted plank house. */
+/** A bright midday yard in front of a painted plank house. */
 export function brightYardFloor(ctx: Ctx, s: number) {
   const u = s / GROUND;
   const px = (x: number) => (x + GROUND / 2) * u;
@@ -171,7 +164,7 @@ export function brightYardFloor(ctx: Ctx, s: number) {
   blades(ctx, s, 5, 26000, ["#4f9a3c", "#8fd163", "#3f8a35", "#a4dc72", "#6db84c"], u * 0.9);
 
   // The yard: swept red earth under the table, reaching to the house door.
-  const { house, tree, trough } = YARD.bright;
+  const { house, tree, trough } = YARD;
   earth(ctx, px(0), px(1), u * 25, 31, "#bd8652", "#a87245");
   earth(ctx, px(house.x + 5), px(house.z + 9), u * 9, 37, "#bd8652", "#a87245");
   earth(ctx, px(trough.x), px(trough.z), u * 7, 41, "#bd8652", "#a87245");
@@ -208,77 +201,5 @@ export function brightYardBackdrop(ctx: Ctx, w: number, h: number) {
       ctx.arc(x + dx * r, y + dy * r, k * r, 0, Math.PI * 2);
       ctx.fill();
     }
-  }
-}
-
-/** Option B: a ranch at golden hour, dry grass and long warm light. */
-export function ranchFloor(ctx: Ctx, s: number) {
-  const u = s / GROUND;
-  const px = (x: number) => (x + GROUND / 2) * u;
-  const g = ctx.createLinearGradient(0, 0, 0, s);
-  g.addColorStop(0, "#c9b45e");
-  g.addColorStop(1, "#b39a4a");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, s, s);
-  const rnd = rng(61);
-  ctx.save();
-  ctx.filter = `blur(${Math.round(u * 2.5)}px)`;
-  for (let i = 0; i < 70; i++) {
-    ctx.fillStyle = rnd() > 0.55 ? "rgba(120,160,70,0.4)" : "rgba(226,200,116,0.4)";
-    blob(ctx, rnd() * s, rnd() * s, u * (3 + rnd() * 6), 300 + i);
-    ctx.fill();
-  }
-  ctx.restore();
-  blades(ctx, s, 67, 24000, ["#d9c46c", "#a8943f", "#e6d58a", "#8aa24a", "#bfa850"], u * 1.0);
-
-  const { house, palm, hay } = YARD.ranch;
-  earth(ctx, px(0), px(1), u * 26, 71, "#b9824f", "#a26c3f");
-  earth(ctx, px(house.x - 5), px(house.z + 9), u * 10, 73, "#b9824f", "#a26c3f");
-  earth(ctx, px(hay.x), px(hay.z), u * 8, 79, "#b17a48", "#a26c3f");
-  // Cart ruts running out of the yard toward the near right corner.
-  ctx.lineCap = "round";
-  for (const off of [-1.6, 1.6]) {
-    ctx.strokeStyle = "rgba(96,58,30,0.45)";
-    ctx.lineWidth = u * 0.9;
-    ctx.beginPath();
-    ctx.moveTo(px(14 + off), px(14));
-    ctx.bezierCurveTo(px(22 + off), px(22), px(26 + off), px(34), px(40 + off), px(45));
-    ctx.stroke();
-  }
-  const inYard = (x: number, y: number) => Math.hypot(x - px(0), y - px(1)) < u * 23;
-  dots(ctx, s, 83, 9000, ["#96633a", "#c9955f", "#8a5a34", "#d6a674"], u * 0.16, inYard);
-  dots(ctx, s, 89, 600, ["#7d7466", "#a69d8c", "#5e5648"], u * 0.3, inYard);
-  // Loose straw around the bales.
-  const r2 = rng(97);
-  ctx.strokeStyle = "#ecd27a";
-  ctx.lineWidth = Math.max(1, u * 0.08);
-  for (let i = 0; i < 700; i++) {
-    const a = r2() * Math.PI * 2;
-    const d = r2() * u * 8;
-    const x = px(hay.x) + Math.cos(a) * d;
-    const y = px(hay.z) + Math.sin(a) * d;
-    const t = r2() * Math.PI;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(t) * u * 0.7, y + Math.sin(t) * u * 0.7);
-    ctx.stroke();
-  }
-  steppingStones(ctx, [px(13), px(-11)], [px(house.x - 6), px(house.z + 9)], u * 1.5, 101, "#b3a892");
-  // Long evening shade.
-  softShade(ctx, px(palm.x + 3), px(palm.z + 2), u * 9, u * 8, 0.4);
-  softShade(ctx, px(house.x - 4), px(house.z - 3), u * 16, u * 10, 0.45, -house.turn);
-  softShade(ctx, s / 2 - u * 3, s / 2 - u * 2, u * 22, u * 20, 0.34);
-  // Warm wash over everything.
-  ctx.fillStyle = "rgba(255,170,70,0.07)";
-  ctx.fillRect(0, 0, s, s);
-}
-
-export function ranchBackdrop(ctx: Ctx, w: number, h: number) {
-  skyAndHills(ctx, w, h, "#f39a55", "#ffe3a8", ["#c99a6a", "#a8894f", "#b39a4a"], "rgba(255,236,170,1)", 0.3);
-  ctx.fillStyle = "rgba(255,214,170,0.75)";
-  for (const [x, y, rw] of [[0.15, 0.2, 0.16], [0.5, 0.14, 0.2], [0.82, 0.24, 0.14]]) {
-    ctx.beginPath();
-    ctx.ellipse(w * x, h * y, w * rw, h * 0.022, 0, 0, Math.PI * 2);
-    ctx.fill();
   }
 }

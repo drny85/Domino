@@ -4,7 +4,7 @@
  * drawn with the 2D canvas API, so no image files are downloaded.
  */
 
-import { brightYardBackdrop, brightYardFloor, ranchBackdrop, ranchFloor } from "./countryside";
+import { brightYardBackdrop, brightYardFloor } from "./countryside";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -184,21 +184,12 @@ export const SCENES: Scene[] = [
   },
   {
     id: "countryside",
-    name: "Countryside A",
+    name: "Countryside",
     haze: "#c9eaf8",
     ambient: 0.6,
     sun: "#fff6dc",
     floor: brightYardFloor,
     backdrop: brightYardBackdrop,
-  },
-  {
-    id: "countryside-ranch",
-    name: "Countryside B",
-    haze: "#ffdfae",
-    ambient: 0.42,
-    sun: "#ffc27a",
-    floor: ranchFloor,
-    backdrop: ranchBackdrop,
   },
   {
     id: "beach",

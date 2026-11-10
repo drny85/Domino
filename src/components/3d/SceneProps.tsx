@@ -51,7 +51,6 @@ function BeachProps() {
 /** Solid objects that stand around the table in a given surrounding. */
 export function SceneProps({ sceneId }: { sceneId: string }) {
   if (sceneId === "beach") return <BeachProps />;
-  if (sceneId === "countryside") return <Countryside variant="bright" />;
-  if (sceneId === "countryside-ranch") return <Countryside variant="ranch" />;
+  if (sceneId === "countryside") return <Countryside />;
   return null;
 }

@@ -118,35 +118,6 @@ function zincTexture(key: string, color: string, rust: number) {
   });
 }
 
-/** Dried palm thatch laid in overlapping courses. */
-function thatchTexture() {
-  return painted("thatch", 512, 512, (ctx) => {
-    const rnd = rng(43);
-    ctx.fillStyle = "#b8975a";
-    ctx.fillRect(0, 0, 512, 512);
-    const courses = 9;
-    for (let c = 0; c < courses; c++) {
-      const y0 = (c / courses) * 512;
-      const h = 512 / courses;
-      for (let i = 0; i < 520; i++) {
-        const x = rnd() * 512;
-        const t = rnd();
-        ctx.strokeStyle = ["#d9bd7c", "#a8854a", "#c7a765", "#8f6f3c", "#e6cf93"][Math.floor(rnd() * 5)];
-        ctx.lineWidth = 1 + rnd() * 2;
-        ctx.beginPath();
-        ctx.moveTo(x, y0 + t * h * 0.3);
-        ctx.lineTo(x + (rnd() - 0.5) * 10, y0 + h * (0.8 + rnd() * 0.5));
-        ctx.stroke();
-      }
-      const g = ctx.createLinearGradient(0, y0 + h * 0.75, 0, y0 + h * 1.1);
-      g.addColorStop(0, "rgba(40,24,8,0)");
-      g.addColorStop(1, "rgba(40,24,8,0.5)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, y0 + h * 0.75, 512, h * 0.35);
-    }
-  });
-}
-
 function leafTexture(a: string, b: string) {
   return painted(`leaf:${a}${b}`, 256, 256, (ctx) => {
     const rnd = rng(5);
@@ -390,198 +361,11 @@ function HenWithChicks({ route, plumage, delay = 0, rest = 3.4 }: { route: Stop[
   );
 }
 
-/** Four legs that trot in diagonal pairs. */
-function Legs({ refs, x, z, length, radius, color, hoof }: { refs: React.RefObject<THREE.Group | null>[]; x: number; z: number; length: number; radius: number; color: string; hoof: string }) {
-  const spots: [number, number][] = [
-    [-x, z],
-    [x, z],
-    [-x, -z],
-    [x, -z],
-  ];
-  return (
-    <>
-      {spots.map(([lx, lz], i) => (
-        <group key={i} ref={refs[i]} position={[lx, length, lz]}>
-          <mesh position={[0, -length / 2, 0]} castShadow>
-            <cylinderGeometry args={[radius, radius * 0.75, length, 8]} />
-            <meshStandardMaterial color={color} roughness={0.85} />
-          </mesh>
-          <mesh position={[0, -length + 0.12, 0]}>
-            <cylinderGeometry args={[radius * 0.85, radius * 0.9, 0.24, 8]} />
-            <meshStandardMaterial color={hoof} roughness={0.5} />
-          </mesh>
-        </group>
-      ))}
-    </>
-  );
-}
-
-function useFourLegs() {
-  const a = useRef<THREE.Group>(null);
-  const b = useRef<THREE.Group>(null);
-  const c = useRef<THREE.Group>(null);
-  const d = useRef<THREE.Group>(null);
-  return [a, b, c, d];
-}
-
-function Goat({ route, delay = 0 }: { route: Stop[]; delay?: number }) {
-  const at = useRoute(route, 1.7, 6, delay);
-  const root = useRef<THREE.Group>(null);
-  const head = useRef<THREE.Group>(null);
-  const tail = useRef<THREE.Mesh>(null);
-  const legs = useFourLegs();
-  useFrame(({ clock }, dt) => {
-    const p = at(clock.elapsedTime);
-    const g = root.current!;
-    g.position.set(p.x, 0, p.z);
-    g.rotation.y = turnToward(g.rotation.y, p.heading, Math.min(1, dt * 4));
-    const walking = p.resting < 0;
-    const swing = walking ? Math.sin(p.walked * 1.9) * 0.5 : 0;
-    legs.forEach((l, i) => (l.current!.rotation.x = i === 0 || i === 3 ? swing : -swing));
-    // Resting: lower the head and graze, lifting it now and then.
-    const graze = !walking && p.resting > 0.08 && p.resting < 0.72 ? 1 : 0;
-    const want = graze ? 1.15 + Math.sin(clock.elapsedTime * 5) * 0.06 : 0;
-    head.current!.rotation.x = THREE.MathUtils.lerp(head.current!.rotation.x, want, Math.min(1, dt * 3));
-    tail.current!.rotation.z = Math.sin(clock.elapsedTime * 9) * 0.5;
-  });
-  const coat = "#f1e8d8";
-  const patch = "#8a5a36";
-  return (
-    <group ref={root} scale={1.15}>
-      <BlobShadow size={[2.2, 3.6]} />
-      <group position={[0, 3.3, 0]}>
-        <mesh scale={[1.05, 1.1, 2.1]} castShadow>
-          <sphereGeometry args={[1, 20, 14]} />
-          <meshStandardMaterial color={coat} roughness={0.95} />
-        </mesh>
-        <mesh position={[0.35, 0.5, -0.5]} scale={[0.8, 0.7, 1.0]}>
-          <sphereGeometry args={[1, 14, 10]} />
-          <meshStandardMaterial color={patch} roughness={0.95} />
-        </mesh>
-        <mesh ref={tail} position={[0, 0.75, -2.0]} rotation={[-0.9, 0, 0]} scale={[0.16, 0.42, 0.16]}>
-          <sphereGeometry args={[1, 8, 8]} />
-          <meshStandardMaterial color={coat} roughness={0.95} />
-        </mesh>
-        <group ref={head} position={[0, 0.55, 1.75]}>
-          <mesh position={[0, 0.65, 0.2]} rotation={[0.5, 0, 0]} scale={[0.5, 1.0, 0.55]}>
-            <sphereGeometry args={[1, 12, 10]} />
-            <meshStandardMaterial color={coat} roughness={0.95} />
-          </mesh>
-          <mesh position={[0, 1.45, 0.75]} rotation={[0.35, 0, 0]} scale={[0.52, 0.55, 0.95]}>
-            <sphereGeometry args={[1, 14, 12]} />
-            <meshStandardMaterial color={patch} roughness={0.9} />
-          </mesh>
-          <mesh position={[0, 1.2, 1.5]} scale={[0.32, 0.3, 0.36]}>
-            <sphereGeometry args={[1, 10, 10]} />
-            <meshStandardMaterial color="#f6efe2" roughness={0.9} />
-          </mesh>
-          <mesh position={[0, 0.72, 1.2]} rotation={[0.3, 0, 0]}>
-            <coneGeometry args={[0.16, 0.7, 8]} />
-            <meshStandardMaterial color="#f6efe2" roughness={1} />
-          </mesh>
-          {[-1, 1].map((s) => (
-            <group key={s}>
-              <mesh position={[s * 0.3, 2.05, 0.35]} rotation={[-0.75, 0, s * 0.25]}>
-                <coneGeometry args={[0.13, 0.9, 8]} />
-                <meshStandardMaterial color="#5b5247" roughness={0.6} />
-              </mesh>
-              <mesh position={[s * 0.62, 1.5, 0.45]} rotation={[0, 0, s * 1.25]} scale={[0.16, 0.5, 0.3]}>
-                <sphereGeometry args={[1, 8, 8]} />
-                <meshStandardMaterial color={patch} roughness={0.9} />
-              </mesh>
-              <mesh position={[s * 0.42, 1.6, 1.15]}>
-                <sphereGeometry args={[0.07, 8, 8]} />
-                <meshStandardMaterial color="#17120d" roughness={0.2} />
-              </mesh>
-            </group>
-          ))}
-        </group>
-      </group>
-      <Legs refs={legs} x={0.6} z={1.35} length={2.5} radius={0.2} color={coat} hoof="#3a3028" />
-    </group>
-  );
-}
-
-function Pig({ route, delay = 0 }: { route: Stop[]; delay?: number }) {
-  const at = useRoute(route, 1.3, 5, delay);
-  const root = useRef<THREE.Group>(null);
-  const head = useRef<THREE.Group>(null);
-  const legs = useFourLegs();
-  useFrame(({ clock }, dt) => {
-    const p = at(clock.elapsedTime);
-    const g = root.current!;
-    g.position.set(p.x, 0, p.z);
-    g.rotation.y = turnToward(g.rotation.y, p.heading, Math.min(1, dt * 4));
-    const walking = p.resting < 0;
-    const swing = walking ? Math.sin(p.walked * 2.6) * 0.45 : 0;
-    legs.forEach((l, i) => (l.current!.rotation.x = i === 0 || i === 3 ? swing : -swing));
-    // Resting: root around in the dirt.
-    const rooting = !walking && p.resting > 0.1 && p.resting < 0.7;
-    const want = rooting ? 0.55 + Math.sin(clock.elapsedTime * 7) * 0.12 : 0;
-    head.current!.rotation.x = THREE.MathUtils.lerp(head.current!.rotation.x, want, Math.min(1, dt * 4));
-    head.current!.rotation.y = rooting ? Math.sin(clock.elapsedTime * 3) * 0.25 : 0;
-  });
-  const skin = "#f0a9a0";
-  const dark = "#d98a84";
-  return (
-    <group ref={root}>
-      <BlobShadow size={[2.4, 3.4]} />
-      <group position={[0, 2.25, 0]}>
-        <mesh scale={[1.35, 1.25, 2.1]} castShadow>
-          <sphereGeometry args={[1, 22, 16]} />
-          <meshStandardMaterial color={skin} roughness={0.7} />
-        </mesh>
-        <mesh position={[-0.5, 0.6, -0.6]} scale={[0.7, 0.5, 0.8]}>
-          <sphereGeometry args={[1, 12, 10]} />
-          <meshStandardMaterial color="#5a4a44" roughness={0.8} />
-        </mesh>
-        <mesh position={[0, 0.5, -2.1]} rotation={[0.4, 0, 0]}>
-          <torusGeometry args={[0.22, 0.06, 8, 16, Math.PI * 1.6]} />
-          <meshStandardMaterial color={dark} roughness={0.7} />
-        </mesh>
-        <group ref={head} position={[0, 0.2, 1.6]}>
-          <mesh position={[0, 0, 0.5]} scale={[0.95, 0.9, 0.95]}>
-            <sphereGeometry args={[1, 16, 14]} />
-            <meshStandardMaterial color={skin} roughness={0.7} />
-          </mesh>
-          <mesh position={[0, -0.15, 1.45]} rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.42, 0.48, 0.45, 14]} />
-            <meshStandardMaterial color={dark} roughness={0.6} />
-          </mesh>
-          {[-1, 1].map((s) => (
-            <group key={s}>
-              <mesh position={[s * 0.15, -0.15, 1.69]}>
-                <sphereGeometry args={[0.07, 8, 8]} />
-                <meshStandardMaterial color="#7a3f3f" roughness={0.6} />
-              </mesh>
-              <mesh position={[s * 0.62, 0.8, 0.55]} rotation={[0.9, 0, s * 0.5]} scale={[0.38, 0.5, 0.12]}>
-                <sphereGeometry args={[1, 10, 8]} />
-                <meshStandardMaterial color={dark} roughness={0.7} />
-              </mesh>
-              <mesh position={[s * 0.5, 0.3, 1.25]}>
-                <sphereGeometry args={[0.08, 8, 8]} />
-                <meshStandardMaterial color="#17120d" roughness={0.2} />
-              </mesh>
-            </group>
-          ))}
-        </group>
-      </group>
-      <Legs refs={legs} x={0.75} z={1.2} length={1.2} radius={0.26} color={skin} hoof="#6d4a44" />
-    </group>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /* Buildings and yard furniture                                        */
 /* ------------------------------------------------------------------ */
 
-type HouseLook = {
-  wall: THREE.Texture;
-  trim: string;
-  door: string;
-  roof: "zinc" | "thatch";
-  roofColor?: string;
-};
+type HouseLook = { wall: THREE.Texture; trim: string; door: string; roofColor: string };
 
 const HOUSE_W = 17;
 const HOUSE_D = 11;
@@ -600,17 +384,11 @@ function PlankHouse({ look }: { look: HouseLook }) {
     return { front: mk(HOUSE_W / 6), side: mk(HOUSE_D / 6) };
   }, [look.wall]);
   const roofMat = useMemo(() => {
-    if (look.roof === "thatch") {
-      const t = thatchTexture().clone();
-      t.repeat.set(3, 1.5);
-      t.needsUpdate = true;
-      return new THREE.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 0.6, roughness: 1, side: THREE.DoubleSide });
-    }
-    const t = zincTexture(look.roofColor!, look.roofColor!, 1).clone();
+    const t = zincTexture(look.roofColor, look.roofColor, 1).clone();
     t.repeat.set(3, 1);
     t.needsUpdate = true;
     return new THREE.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 0.5, roughness: 0.42, metalness: 0.55 });
-  }, [look.roof, look.roofColor]);
+  }, [look.roofColor]);
   const gable = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(-HOUSE_D / 2, 0);
@@ -721,9 +499,7 @@ function PlankHouse({ look }: { look: HouseLook }) {
       ))}
 
       {/* Roof. */}
-      {look.roof === "zinc" ? (
-        <>
-          {[-1, 1].map((s) => (
+      {[-1, 1].map((s) => (
             <mesh key={s} position={[0, BASE + HOUSE_H + rise / 2 - (over * Math.tan(pitch)) / 2 + 0.2, (s * run) / 2]} rotation={[s * pitch, 0, 0]} material={roofMat} castShadow>
               <boxGeometry args={[HOUSE_W + over * 2, 0.16, slope]} />
             </mesh>
@@ -732,58 +508,29 @@ function PlankHouse({ look }: { look: HouseLook }) {
             <cylinderGeometry args={[0.3, 0.3, HOUSE_W + over * 2, 10]} />
             <meshStandardMaterial color="#c9ccd0" roughness={0.4} metalness={0.7} />
           </mesh>
-        </>
-      ) : (
-        <group position={[0, BASE + HOUSE_H + 2.9, 0]} scale={[(HOUSE_W + over * 2.4) / Math.SQRT2, 1, (HOUSE_D + over * 2.4) / Math.SQRT2]}>
-          <mesh rotation={[0, Math.PI / 4, 0]} material={roofMat} castShadow>
-            <coneGeometry args={[1, 6.2, 4, 6]} />
-          </mesh>
-        </group>
-      )}
     </group>
   );
 }
 
-function Fence({ from, to, style }: { from: Stop; to: Stop; style: "picket" | "rail" }) {
+function Fence({ from, to }: { from: Stop; to: Stop }) {
   const len = Math.hypot(to[0] - from[0], to[1] - from[1]);
   const turn = Math.atan2(-(to[1] - from[1]), to[0] - from[0]);
   const white = <meshStandardMaterial color="#f6f3ea" roughness={0.75} />;
-  const wood = <meshStandardMaterial color="#8a6a48" roughness={0.95} />;
-  const posts = Math.round(len / 5);
+  const pickets = Math.round(len / 0.95);
   return (
     <group position={[(from[0] + to[0]) / 2, 0, (from[1] + to[1]) / 2]} rotation={[0, turn, 0]}>
-      {style === "picket" ? (
-        <>
-          {[1.2, 2.6].map((y) => (
-            <mesh key={y} position={[0, y, 0]}>
-              <boxGeometry args={[len, 0.3, 0.16]} />
-              {white}
-            </mesh>
-          ))}
-          {Array.from({ length: Math.round(len / 0.95) }, (_, i) => (
-            <mesh key={i} position={[-len / 2 + (i + 0.5) * (len / Math.round(len / 0.95)), 1.8, 0.14]} castShadow>
-              <boxGeometry args={[0.55, 3.6, 0.12]} />
-              {white}
-            </mesh>
-          ))}
-        </>
-      ) : (
-        <>
-          {[1.5, 3.0].map((y, i) => (
-            <mesh key={y} position={[0, y, 0]} rotation={[0, 0, i ? 0.012 : -0.015]}>
-              <cylinderGeometry args={[0.2, 0.17, len, 7]} />
-              {wood}
-              <group />
-            </mesh>
-          ))}
-          {Array.from({ length: posts + 1 }, (_, i) => (
-            <mesh key={i} position={[-len / 2 + (i * len) / posts, 2.0, 0]} rotation={[0, 0, (i % 2 ? 1 : -1) * 0.04]} castShadow>
-              <cylinderGeometry args={[0.3, 0.36, 4.0, 8]} />
-              {wood}
-            </mesh>
-          ))}
-        </>
-      )}
+      {[1.2, 2.6].map((y) => (
+        <mesh key={y} position={[0, y, 0]}>
+          <boxGeometry args={[len, 0.3, 0.16]} />
+          {white}
+        </mesh>
+      ))}
+      {Array.from({ length: pickets }, (_, i) => (
+        <mesh key={i} position={[-len / 2 + (i + 0.5) * (len / pickets), 1.8, 0.14]} castShadow>
+          <boxGeometry args={[0.55, 3.6, 0.12]} />
+          {white}
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -816,39 +563,6 @@ function MangoTree() {
           <meshStandardMaterial color={i % 2 ? "#ffb23b" : "#f47b3a"} roughness={0.5} />
         </mesh>
       ))}
-    </group>
-  );
-}
-
-function CoconutPalm() {
-  const frond = leafTexture("#2c7a30", "#4f9a38");
-  return (
-    <group rotation={[0, 0, -0.1]}>
-      {Array.from({ length: 3 }, (_, i) => (
-        <mesh key={i} position={[Math.sin(i * 0.22) * 1.2, 1.5 + i * 3, 0]} rotation={[0, 0, -i * 0.035]}>
-          <cylinderGeometry args={[0.62 - i * 0.03, 0.72 - i * 0.03, 3.2, 10]} />
-          <meshStandardMaterial color={i % 2 ? "#8a7458" : "#7a6549"} roughness={1} />
-        </mesh>
-      ))}
-      <group position={[0.6, 9.4, 0]}>
-        {Array.from({ length: 11 }, (_, i) => {
-          const a = (i / 11) * Math.PI * 2;
-          return (
-            <group key={i} rotation={[0, a, 0]}>
-              <mesh position={[4.2, -0.9 - (i % 3) * 0.4, 0]} rotation={[0, 0, -0.38 - (i % 3) * 0.12]} scale={[4.6, 0.12, 1.15]}>
-                <sphereGeometry args={[1, 12, 8]} />
-                <meshStandardMaterial map={frond} roughness={0.8} />
-              </mesh>
-            </group>
-          );
-        })}
-        {[0, 1, 2].map((i) => (
-          <mesh key={i} position={[Math.cos(i * 2.1) * 0.8, -0.9, Math.sin(i * 2.1) * 0.8]}>
-            <sphereGeometry args={[0.6, 10, 8]} />
-            <meshStandardMaterial color="#6b4f2c" roughness={0.9} />
-          </mesh>
-        ))}
-      </group>
     </group>
   );
 }
@@ -912,67 +626,8 @@ function Trough() {
   );
 }
 
-function HayBale({ round = false }: { round?: boolean }) {
-  const straw = painted("straw", 256, 256, (ctx) => {
-    const rnd = rng(3);
-    ctx.fillStyle = "#d9b95a";
-    ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 2600; i++) {
-      ctx.strokeStyle = ["#f0d98a", "#b8963c", "#e3c66a", "#a8842f"][Math.floor(rnd() * 4)];
-      ctx.lineWidth = 1 + rnd();
-      const x = rnd() * 256;
-      const y = rnd() * 256;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + 8 + rnd() * 18, y + (rnd() - 0.5) * 6);
-      ctx.stroke();
-    }
-  });
-  return round ? (
-    <mesh position={[0, 2.4, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-      <cylinderGeometry args={[2.4, 2.4, 3.6, 24]} />
-      <meshStandardMaterial map={straw} bumpMap={straw} bumpScale={0.4} roughness={1} />
-    </mesh>
-  ) : (
-    <group>
-      <mesh position={[0, 1.3, 0]} castShadow>
-        <boxGeometry args={[5.2, 2.6, 2.8]} />
-        <meshStandardMaterial map={straw} bumpMap={straw} bumpScale={0.4} roughness={1} />
-      </mesh>
-      {[-1.4, 1.4].map((x) => (
-        <mesh key={x} position={[x, 1.3, 0]}>
-          <boxGeometry args={[0.12, 2.66, 2.86]} />
-          <meshStandardMaterial color="#7a4a2a" roughness={0.8} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function Barrel() {
-  return (
-    <group>
-      <BlobShadow size={[1.9, 1.9]} />
-      <mesh position={[0, 1.9, 0]} castShadow>
-        <cylinderGeometry args={[1.35, 1.2, 3.8, 18]} />
-        <meshStandardMaterial map={plankTexture("barrel", "#7b5330")} roughness={0.85} />
-      </mesh>
-      {[0.7, 3.1].map((y) => (
-        <mesh key={y} position={[0, y, 0]}>
-          <cylinderGeometry args={[1.36, 1.3, 0.22, 18]} />
-          <meshStandardMaterial color="#4a4640" roughness={0.45} metalness={0.7} />
-        </mesh>
-      ))}
-      <mesh position={[0, 3.75, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.22, 18]} />
-        <meshPhysicalMaterial color="#3d6f86" roughness={0.08} metalness={0.2} clearcoat={1} />
-      </mesh>
-    </group>
-  );
-}
-
 /* ------------------------------------------------------------------ */
-/* The two yards                                                       */
+/* The yard                                                            */
 /* ------------------------------------------------------------------ */
 
 const BRIGHT_ROUTES: Record<string, Stop[]> = {
@@ -984,10 +639,10 @@ const BRIGHT_ROUTES: Record<string, Stop[]> = {
   rooster: [[18, -10], [23, -13], [25, -8], [20, -16]],
 };
 
-/** Option A: painted casita with a zinc roof, hens in a swept yard, midday sun. */
+/** Painted casita with a zinc roof, hens in a swept yard, midday sun. */
 function BrightYard() {
-  const { house, tree, trough } = YARD.bright;
-  const look = useMemo<HouseLook>(() => ({ wall: plankTexture("turquoise", "#8a6a48", "#27b3ad"), trim: "#fbf8ef", door: "#ff6f59", roof: "zinc", roofColor: "#c2402c" }), []);
+  const { house, tree, trough } = YARD;
+  const look = useMemo<HouseLook>(() => ({ wall: plankTexture("turquoise", "#8a6a48", "#27b3ad"), trim: "#fbf8ef", door: "#ff6f59", roofColor: "#c2402c" }), []);
   return (
     <group position={[0, FLOOR_Y, 0]}>
       <AmbientFrames />
@@ -1014,8 +669,8 @@ function BrightYard() {
       <group position={[trough.x, 0, trough.z]} rotation={[0, 0.5, 0]}>
         <Trough />
       </group>
-      <Fence from={[36, -8]} to={[36, 24]} style="picket" />
-      <Fence from={[-12, -31]} to={[20, -31]} style="picket" />
+      <Fence from={[36, -8]} to={[36, 24]} />
+      <Fence from={[-12, -31]} to={[20, -31]} />
       <Chicken route={BRIGHT_ROUTES.white} plumage={HEN_WHITE} />
       <HenWithChicks route={BRIGHT_ROUTES.red} plumage={HEN_RED} delay={2} />
       <Chicken route={BRIGHT_ROUTES.speckled} plumage={HEN_SPECKLED} delay={5} speed={2.8} rest={2} />
@@ -1025,55 +680,6 @@ function BrightYard() {
   );
 }
 
-const RANCH_ROUTES: Record<string, Stop[]> = {
-  goat: [[-24, -9], [-18, -13], [-22, -17], [-27, -12]],
-  pig: [[-19, 8], [-25, 9], [-24, 13], [-18, 12]],
-  red: [[24, -6], [26, 4], [15, 16], [0, 18], [-16, 16], [-26, 3], [-10, -21], [8, -21]],
-  speckled: [[18, 8], [21, 12], [16, 13]],
-  rooster: [[19, -9], [15, -13], [21, -13]],
-};
-
-/** Option B: bare-board ranch house under palm thatch, goat, pig and hens, evening light. */
-function Ranch() {
-  const { house, palm, hay } = YARD.ranch;
-  const look = useMemo<HouseLook>(() => ({ wall: plankTexture("bare", "#a8845c"), trim: "#6b4a2e", door: "#2f7f6f", roof: "thatch" }), []);
-  return (
-    <group position={[0, FLOOR_Y, 0]}>
-      <AmbientFrames />
-      {/* Low evening sun from the left, on top of the scene's own light. */}
-      <directionalLight position={[-30, 14, 6]} intensity={1.1} color="#ff9d4d" />
-      <group position={[house.x, 0, house.z]} rotation={[0, house.turn, 0]}>
-        <PlankHouse look={look} />
-        <group position={[-11, 0, 4]}>
-          <Barrel />
-        </group>
-      </group>
-      <group position={[palm.x, 0, palm.z]}>
-        <CoconutPalm />
-      </group>
-      <group position={[hay.x, 0, hay.z]}>
-        <BlobShadow size={[5.5, 4.5]} opacity={0.4} />
-        <group rotation={[0, 0.4, 0]}>
-          <HayBale />
-        </group>
-        <group position={[0.6, 2.6, 0.2]} rotation={[0, -0.3, 0]} scale={0.92}>
-          <HayBale />
-        </group>
-        <group position={[-5.5, 0, 4.5]} rotation={[0, 0.9, 0]}>
-          <HayBale round />
-        </group>
-      </group>
-      <Fence from={[-37, -12]} to={[-37, 22]} style="rail" />
-      <Fence from={[-16, -32]} to={[14, -32]} style="rail" />
-      <Goat route={RANCH_ROUTES.goat} />
-      <Pig route={RANCH_ROUTES.pig} delay={3} />
-      <HenWithChicks route={RANCH_ROUTES.red} plumage={HEN_RED} delay={1} rest={2} />
-      <Chicken route={RANCH_ROUTES.speckled} plumage={HEN_SPECKLED} delay={4} />
-      <Chicken route={RANCH_ROUTES.rooster} plumage={ROOSTER} rooster delay={6} rest={4} />
-    </group>
-  );
-}
-
-export function Countryside({ variant }: { variant: "bright" | "ranch" }) {
-  return variant === "bright" ? <BrightYard /> : <Ranch />;
+export function Countryside() {
+  return <BrightYard />;
 }
