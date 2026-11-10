@@ -52,7 +52,7 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
   const setOptions = useMutation(api.games.setRoomOptions);
   const t = useT();
   const { room, me } = state;
-  const editable = !!me?.isHost && room.status !== "playing";
+  const editable = (!!me?.isHost || !!state.spectator?.isHost) && room.status !== "playing";
   const save = (patch: { turnSeconds?: 0 | 20 | 30; bonuses?: boolean; cpuLevel?: "easy" | "normal" | "hard" }) =>
     setOptions({ roomId: room.id, sessionId, ...patch }).catch((e) => onError?.(errorMessage(e)));
   return (
@@ -71,7 +71,7 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
       />
       <Segmented
         label={t("Bonuses")}
-        hint={room.matchType === "2v2" ? t("+25 capicúa, +25 when all three pass") : t("+25 for a capicúa")}
+        hint={room.seats === 4 ? t("+25 capicúa, +25 when all three pass") : t("+25 for a capicúa")}
         value={room.bonuses ? "on" : "off"}
         editable={editable}
         options={[
@@ -80,7 +80,7 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
         ]}
         onPick={(v) => save({ bonuses: v === "on" })}
       />
-      {room.matchType === "cpu" && (
+      {(room.matchType === "cpu" || room.matchType === "watch") && (
         <Segmented
           label={t("CPU level")}
           value={room.cpuLevel}

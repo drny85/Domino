@@ -7,6 +7,7 @@ import {
   AVATARS,
   BONUS_POINTS,
   DRINK_REACTION,
+  NO_DRINK_REACTION,
   HURRY_REACTION,
   REACTIONS,
   blockedWinner,
@@ -18,6 +19,7 @@ import {
   findStartingPlayer,
   generateRoomCode,
   hasPlayableTile,
+  isTeamMatch,
   isBlocked,
   pipTotal,
   placeTile,
@@ -41,6 +43,14 @@ const AWAY_CHECK_MS = 15_000;
 /** Pause before the server plays for someone who is already away. */
 const STAND_IN_DELAY_MS = 2_500;
 const REACTION_COOLDOWN_MS = 1_200;
+/** Pause on the round summary before a watched CPU match deals again. */
+const WATCH_NEXT_ROUND_MS = 6_000;
+const WATCH_BOTS = [
+  { name: "Tío Luis", avatar: "🤠" },
+  { name: "Doña Ana", avatar: "👑" },
+  { name: "Pepe", avatar: "🐓" },
+  { name: "Carmen", avatar: "😎" },
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,6 +140,9 @@ async function finishRound(
     lastRound: { points, bonus: bonus?.points ?? 0, bonusKind: bonus?.kind },
     turnDeadline: undefined,
   });
+  if (room.matchType === "watch" && !matchOver) {
+    await ctx.scheduler.runAfter(WATCH_NEXT_ROUND_MS, internal.games.autoNextRound, { roomId: room._id, round: room.round ?? 0 });
+  }
 }
 
 async function endIfBlocked(
@@ -317,6 +330,23 @@ export const createRoom = mutation({
       bonuses: false,
       cpuLevel,
     });
+    if (matchType === "watch") {
+      // Four CPU players; the creator only watches. The match starts at once.
+      for (let i = 0; i < 4; i++) {
+        await ctx.db.insert("players", {
+          roomId,
+          sessionId: `cpu:${roomId}:${i}`,
+          name: WATCH_BOTS[i].name,
+          seatIndex: i,
+          hand: [],
+          score: 0,
+          isBot: true,
+          avatar: WATCH_BOTS[i].avatar,
+        });
+      }
+      await beginRound(ctx, roomId);
+      return { roomId, code };
+    }
     await ctx.db.insert("players", {
       roomId,
       sessionId,
@@ -364,8 +394,9 @@ export const joinRoom = mutation({
       return { roomId: room._id, code: room.code, seatIndex: existing.seatIndex };
     }
 
-    if (room.status !== "waiting") throw new Error("This game has already started");
     if (room.matchType === "cpu") throw new Error("This is a private game against the CPU");
+    if (room.matchType === "watch") throw new Error("This match is only for watching");
+    if (room.status !== "waiting") throw new Error("This game has already started");
     const players = await getPlayers(ctx, room._id);
     if (players.length >= seatsFor(room.matchType)) throw new Error("This room is full");
 
@@ -475,7 +506,7 @@ export const sendReaction = mutation({
     await ctx.db.patch(me._id, {
       reaction: { text: reaction, at: now },
       lastSeen: now,
-      ...(reaction === DRINK_REACTION ? { drink: true } : {}),
+      ...(reaction === DRINK_REACTION ? { drink: true } : reaction === NO_DRINK_REACTION ? { drink: false } : {}),
     });
   },
 });
@@ -486,6 +517,26 @@ export const setAvatar = mutation({
     const me = await getPlayer(ctx, roomId, sessionId);
     const clean = cleanAvatar(avatar);
     if (me && clean) await ctx.db.patch(me._id, { avatar: clean });
+  },
+});
+
+/**
+ * Called when a player's table has just finished loading on their turn. The
+ * turn clock restarts once for that turn, so loading time is not held against them.
+ */
+export const tableReady = mutation({
+  args: { roomId: v.id("rooms"), sessionId: v.string() },
+  handler: async (ctx, { roomId, sessionId }) => {
+    const room = await getRoomOrThrow(ctx, roomId);
+    const me = await getPlayer(ctx, roomId, sessionId);
+    if (!me) return;
+    const now = Date.now();
+    await ctx.db.patch(me._id, { lastSeen: now });
+    const turnId = room.turnId ?? 0;
+    const seconds = room.turnSeconds ?? 0;
+    if (room.status !== "playing" || room.currentTurnSeat !== me.seatIndex || seconds === 0) return;
+    if (room.graceTurnId === turnId || room.turnDeadline === undefined) return;
+    await ctx.db.patch(roomId, { graceTurnId: turnId, turnDeadline: now + seconds * 1000 });
   },
 });
 
@@ -502,6 +553,50 @@ export const heartbeat = mutation({
 // Game flow
 // ---------------------------------------------------------------------------
 
+/** Deals and starts a round (or a fresh match when the last one is over). */
+async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
+  const room = await getRoomOrThrow(ctx, roomId);
+  const players = await getPlayers(ctx, roomId);
+  const needed = seatsFor(room.matchType);
+  if (players.length !== needed) {
+    throw new Error(`This match needs ${needed} players (${players.length} seated)`);
+  }
+
+  // A finished match starts over: scores back to zero, round 1.
+  const newMatch = !!room.matchOver;
+  const { hands, boneyard } = deal(players.length);
+  // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
+  // In 2v2 the lobby already fills seats 0-3, so partners stay across.
+  for (let i = 0; i < players.length; i++) {
+    await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
+  }
+
+  // The winner of the last round opens the next one. A new match, or a round
+  // nobody won (a tied block), is opened by whoever holds the highest double.
+  const lastWinner = newMatch ? -1 : players.findIndex((p) => p.sessionId === room.winnerSessionId);
+  const starter = lastWinner >= 0 ? lastWinner : findStartingPlayer(hands);
+
+  await ctx.db.patch(roomId, {
+    status: "playing",
+    currentTurnSeat: starter,
+    openEnds: { left: null, right: null },
+    board: [],
+    boneyard,
+    winnerSessionId: undefined,
+    winReason: undefined,
+    round: newMatch ? 1 : (room.round ?? 0) + 1,
+    consecutivePasses: 0,
+    lastAction: undefined,
+    matchOver: false,
+    matchWinnerTeam: undefined,
+    turnId: (room.turnId ?? 0) + 1,
+    turnDeadline: undefined,
+    voids: players.map(() => []),
+    bonusEvent: undefined,
+  });
+  await scheduleNext(ctx, roomId);
+}
+
 /** Starts the first round, or the next round once a round has finished. */
 export const startGame = mutation({
   args: { roomId: v.id("rooms"), sessionId: v.string() },
@@ -516,45 +611,17 @@ export const startGame = mutation({
       const seated = players.some((p) => p.sessionId === sessionId);
       if (!(room.status === "finished" && hostAway && seated)) throw new Error("Only the host can start the game");
     }
+    await beginRound(ctx, roomId);
+  },
+});
 
-    const needed = seatsFor(room.matchType);
-    if (players.length !== needed) {
-      throw new Error(`This match needs ${needed} players (${players.length} seated)`);
-    }
-
-    // A finished match starts over: scores back to zero, round 1.
-    const newMatch = !!room.matchOver;
-    const { hands, boneyard } = deal(players.length);
-    // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
-    // In 2v2 the lobby already fills seats 0-3, so partners stay across.
-    for (let i = 0; i < players.length; i++) {
-      await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
-    }
-
-    // The winner of the last round opens the next one. A new match, or a round
-    // nobody won (a tied block), is opened by whoever holds the highest double.
-    const lastWinner = newMatch ? -1 : players.findIndex((p) => p.sessionId === room.winnerSessionId);
-    const starter = lastWinner >= 0 ? lastWinner : findStartingPlayer(hands);
-
-    await ctx.db.patch(roomId, {
-      status: "playing",
-      currentTurnSeat: starter,
-      openEnds: { left: null, right: null },
-      board: [],
-      boneyard,
-      winnerSessionId: undefined,
-      winReason: undefined,
-      round: newMatch ? 1 : (room.round ?? 0) + 1,
-      consecutivePasses: 0,
-      lastAction: undefined,
-      matchOver: false,
-      matchWinnerTeam: undefined,
-      turnId: (room.turnId ?? 0) + 1,
-      turnDeadline: undefined,
-      voids: players.map(() => []),
-      bonusEvent: undefined,
-    });
-    await scheduleNext(ctx, roomId);
+/** Watched CPU matches deal their own next round after a short pause. */
+export const autoNextRound = internalMutation({
+  args: { roomId: v.id("rooms"), round: v.number() },
+  handler: async (ctx, { roomId, round }) => {
+    const room = await ctx.db.get(roomId);
+    if (!room || room.status !== "finished" || room.matchOver || (room.round ?? 0) !== round) return;
+    await beginRound(ctx, roomId);
   },
 });
 
@@ -702,7 +769,7 @@ export const getGameState = query({
     const isConnected = (p: Doc<"players">) => !!p.isBot || now - (p.lastSeen ?? 0) < CONNECTED_WINDOW_MS;
     const seatOf = (sid: string | undefined) =>
       sid === undefined ? null : (players.find((p) => p.sessionId === sid)?.seatIndex ?? null);
-    const teamOf = (seat: number) => (room.matchType === "2v2" ? seat % 2 : seat);
+    const teamOf = (seat: number) => (isTeamMatch(room.matchType) ? seat % 2 : seat);
     const finished = room.status === "finished";
     const host = players.find((p) => p.sessionId === room.hostSessionId);
     const hostAway = !host || now - (host.lastSeen ?? 0) > AWAY_MS;
@@ -742,6 +809,11 @@ export const getGameState = query({
         lastRound: finished ? (room.lastRound ?? null) : null,
         bonusEvent: room.bonusEvent ?? null,
       },
+      // A watched CPU match has no seat for the viewer; they see the south hand instead.
+      spectator:
+        !me && room.matchType === "watch"
+          ? { isHost: room.hostSessionId === sessionId, hand: players[0]?.hand ?? [], seatIndex: 0 }
+          : null,
       me: me
         ? {
             id: me._id,

@@ -87,6 +87,8 @@ export default function RoomPage() {
     );
   }
 
+  if (!state!.me && state!.spectator) return <GameView state={state!} sessionId={session.sessionId} />;
+
   if (!state!.me) {
     const open = roomInfo.status === "waiting" && roomInfo.playerCount < roomInfo.seats && roomInfo.matchType !== "cpu";
     return (

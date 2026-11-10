@@ -16,7 +16,7 @@ export const modeValidator = v.union(v.literal("draw"), v.literal("block"));
 export const targetScoreValidator = v.union(v.literal(100), v.literal(200));
 export const cpuLevelValidator = v.union(v.literal("easy"), v.literal("normal"), v.literal("hard"));
 export const turnSecondsValidator = v.union(v.literal(0), v.literal(20), v.literal(30));
-export const matchTypeValidator = v.union(v.literal("1v1"), v.literal("2v2"), v.literal("cpu"));
+export const matchTypeValidator = v.union(v.literal("1v1"), v.literal("2v2"), v.literal("cpu"), v.literal("watch"));
 
 export default defineSchema({
   rooms: defineTable({
@@ -55,6 +55,8 @@ export default defineSchema({
     // Turn clock: `turnId` grows every time the turn moves on.
     turnId: v.optional(v.number()),
     timerTurnId: v.optional(v.number()),
+    // The turn whose clock was restarted once because the player's table was still loading.
+    graceTurnId: v.optional(v.number()),
     turnDeadline: v.optional(v.number()),
     // Per seat: numbers that player could not match this round (public knowledge).
     voids: v.optional(v.array(v.array(v.number()))),

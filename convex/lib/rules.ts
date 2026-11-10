@@ -171,16 +171,21 @@ export function isBlocked(
   return !hands.some((h) => hasPlayableTile(h, board, ends));
 }
 
-export type MatchType = "1v1" | "2v2" | "cpu";
+export type MatchType = "1v1" | "2v2" | "cpu" | "watch";
+
+/** Four players in two teams: a 2v2 game, or a CPU match being watched. */
+export function isTeamMatch(matchType: MatchType): boolean {
+  return matchType === "2v2" || matchType === "watch";
+}
 
 /** Seats a match type needs before it can start. */
 export function seatsFor(matchType: MatchType): number {
-  return matchType === "2v2" ? 4 : 2;
+  return isTeamMatch(matchType) ? 4 : 2;
 }
 
 /** Team id per seat: partners in 2v2 sit across (0 & 2 vs 1 & 3). */
 export function teamsFor(matchType: MatchType, playerCount: number): number[] {
-  return Array.from({ length: playerCount }, (_, seat) => (matchType === "2v2" ? seat % 2 : seat));
+  return Array.from({ length: playerCount }, (_, seat) => (isTeamMatch(matchType) ? seat % 2 : seat));
 }
 
 /**
@@ -295,11 +300,13 @@ export function isCapicua(tile: Tile, ends: OpenEnds): boolean {
 }
 
 /** One-tap table talk. Anything else is rejected by the server. */
-export const REACTIONS = ["¡Capicúa!", "¡Tranque!", "Paso", "¡Ahí va!", "¡Dale!", "Buena jugada", "Bring me a drink!", "👏", "😂", "😎", "🔥", "😱"] as const;
+export const REACTIONS = ["¡Capicúa!", "¡Tranque!", "Paso", "¡Ahí va!", "¡Dale!", "Buena jugada", "Bring me a drink!", "Take my drink away", "👏", "😂", "😎", "🔥", "😱"] as const;
 /** Hurries the player on the move, so it makes no sense on your own turn. */
 export const HURRY_REACTION = "¡Dale!";
 /** Puts a drink in the cup holder on the sender's right. */
 export const DRINK_REACTION = "Bring me a drink!";
+/** Clears the sender's drink. Offered in place of the drink request while one is out. */
+export const NO_DRINK_REACTION = "Take my drink away";
 
 /** Seat avatars a player can pick. */
 export const AVATARS = ["🙂", "😎", "🤠", "🦁", "🐯", "🦅", "🐓", "🌴", "⚾", "🎩", "👑", "🔥", "🇩🇴", "🇵🇷", "🇨🇺", "🇲🇽", "🇻🇪", "🇨🇴", "🇺🇸", "🇪🇸"] as const;

@@ -361,3 +361,30 @@ describe("who opens", () => {
     vi.useRealTimers();
   });
 });
+
+describe("watching a CPU match", () => {
+  it("four CPUs play a whole match to 100 on their own while the creator watches", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId, code } = await t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw", matchType: "watch", targetScore: 100 });
+    await expect(t.mutation(api.games.joinRoom, { code, sessionId: S(1), playerName: "X" })).rejects.toThrow(/watching/);
+    const start = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(start.me).toBeNull();
+    expect(start.spectator?.isHost).toBe(true);
+    expect(start.spectator?.hand).toHaveLength(7);
+    expect(start.opponents).toHaveLength(4);
+    expect(start.opponents.every((o) => o.isBot)).toBe(true);
+    expect(start.room.status).toBe("playing");
+
+    await t.finishAllScheduledFunctions(vi.runAllTimers, 20_000);
+    const end = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(end.room.matchOver).toBe(true);
+    expect(end.room.round).toBeGreaterThan(1);
+    const team = (n: number) => end.opponents.filter((o) => o.team === n).reduce((a, o) => a + o.score, 0);
+    expect(Math.max(team(0), team(1))).toBeGreaterThanOrEqual(100);
+    // The creator can ask for a rematch; a stranger cannot.
+    await expect(t.mutation(api.games.startGame, { roomId, sessionId: S(5) })).rejects.toThrow(/host/);
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    vi.useRealTimers();
+  });
+});

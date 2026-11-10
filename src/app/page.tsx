@@ -14,13 +14,14 @@ import { useSession } from "@/lib/session";
 import { errorMessage } from "@/store/useGameStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
-type MatchType = "1v1" | "2v2" | "cpu";
+type MatchType = "1v1" | "2v2" | "cpu" | "watch";
 type Mode = "draw" | "block";
 
 const MATCHES: { id: MatchType; title: string; detail: string }[] = [
   { id: "1v1", title: "1 vs 1", detail: "Invite a friend" },
   { id: "2v2", title: "2 vs 2", detail: "Teams, partners sit across" },
   { id: "cpu", title: "vs CPU", detail: "Play solo right now" },
+  { id: "watch", title: "CPU vs CPU", detail: "Watch a full match" },
 ];
 
 export default function Home() {
@@ -110,8 +111,8 @@ export default function Home() {
         {mounted && <AvatarPicker value={avatar} onChange={setAvatar} />}
         {mounted && stats.roundsWon + stats.roundsLost > 0 && (
           <p className="text-xs text-stone-400">
-            {t("Your record: {won} matches won, {lost} lost · {rounds} rounds won", { won: stats.matchesWon, lost: stats.matchesLost, rounds: stats.roundsWon })}
-            {stats.capicuas > 0 && <> · {t("{n} capicúas", { n: stats.capicuas })}</>}
+            {t("Your record: matches {won}-{lost} · rounds won: {rounds}", { won: stats.matchesWon, lost: stats.matchesLost, rounds: stats.roundsWon })}
+            {stats.capicuas > 0 && <> · {t("capicúas: {n}", { n: stats.capicuas })}</>}
             {stats.bestStreak > 1 && <> · {t("best streak {n}", { n: stats.bestStreak })}</>}
           </p>
         )}
@@ -119,14 +120,14 @@ export default function Home() {
 
       <section className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">{t("New game")}</h2>
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t("Match type")}>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t("Match type")}>
           {MATCHES.map((m) => (
             <button
               key={m.id}
               role="radio"
               aria-checked={matchType === m.id}
               onClick={() => setMatchType(m.id)}
-              className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 text-center transition ${
+              className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 text-center transition ${
                 matchType === m.id
                   ? "border-brass bg-brass/15 text-white"
                   : "border-white/10 bg-black/20 text-stone-300 active:bg-black/40"
@@ -172,7 +173,7 @@ export default function Home() {
           </div>
         </div>
 
-        {matchType === "cpu" && (
+        {(matchType === "cpu" || matchType === "watch") && (
           <div className="flex items-center gap-3">
             <span className="text-sm text-stone-300">{t("CPU level")}</span>
             <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("CPU level")}>
@@ -204,7 +205,7 @@ export default function Home() {
           disabled={!ready || busy !== null}
           className="h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 shadow-lg shadow-black/30 transition active:scale-[0.98] disabled:opacity-40"
         >
-          {busy === "create" ? t("Creating…") : matchType === "cpu" ? t("Play vs CPU") : t("Create room")}
+          {busy === "create" ? t("Creating…") : matchType === "cpu" ? t("Play vs CPU") : matchType === "watch" ? t("Watch match") : t("Create room")}
         </button>
       </section>
 

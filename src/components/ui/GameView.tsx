@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
-import { HURRY_REACTION, REACTIONS, type Side, type Tile } from "../../../convex/lib/rules";
+import { DRINK_REACTION, HURRY_REACTION, NO_DRINK_REACTION, REACTIONS, isTeamMatch, type Side, type Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
 import { useT } from "@/lib/i18n";
@@ -46,7 +46,7 @@ type Seat = {
 };
 
 export function GameView({ state, sessionId }: { state: GameState; sessionId: string }) {
-  const { room, me, opponents } = state;
+  const { room, me, opponents, spectator } = state;
   const t = useT();
   const playTile = useMutation(api.games.playTile);
   const drawOrPass = useMutation(api.games.drawOrPass);
@@ -64,7 +64,12 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   useEffect(() => () => releaseLandscape(), []);
   // The 3D scene takes a moment to build; cover the canvas until its first frame.
   const [sceneReady, setSceneReady] = useState(false);
-  const onSceneReady = useCallback(() => setSceneReady(true), []);
+  const tableReady = useMutation(api.games.tableReady);
+  // Tell the server the table is on screen, so a turn timer does not count the loading time.
+  const onSceneReady = useCallback(() => {
+    setSceneReady(true);
+    void tableReady({ roomId: state.room.id, sessionId }).catch(() => {});
+  }, [tableReady, state.room.id, sessionId]);
 
   const seats: Seat[] = useMemo(() => {
     const list: Seat[] = opponents.map((o) => ({ ...o, isMe: false }));
@@ -89,7 +94,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
   const bySeat = (seat: number | null | undefined) => seats.find((s) => s.seatIndex === seat);
   const current = bySeat(room.currentTurnSeat);
-  const isTeams = room.matchType === "2v2";
+  const isTeams = isTeamMatch(room.matchType);
   const teamScore = (team: number) => seats.filter((s) => s.team === team).reduce((a, s) => a + s.score, 0);
 
   // Opponents in turn order, starting with whoever plays after me.
@@ -99,7 +104,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     .sort((a, b) => ((a.seatIndex - mySeat + seats.length) % seats.length) - ((b.seatIndex - mySeat + seats.length) % seats.length));
 
   const playableMap = useMemo(() => new Map(me?.playable.map((p) => [p.tileId, p.sides as Side[]]) ?? []), [me?.playable]);
-  const hand = useMemo(() => [...(me?.hand ?? [])].sort((x, y) => x.a - y.a || x.b - y.b), [me?.hand]);
+  const ownHand = me?.hand ?? spectator?.hand;
+  const hand = useMemo(() => [...(ownHand ?? [])].sort((x, y) => x.a - y.a || x.b - y.b), [ownHand]);
   const selected = hand.find((t) => t.id === selectedTileId) ?? null;
   const handSpecs = useMemo(
     () =>
@@ -132,15 +138,20 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     return () => clearTimeout(id);
   }, [toast, clearToast]);
 
+  // Set at once (state updates lag a tap), so a quick double tap sends one move.
+  const busy = useRef(false);
   async function play(tile: Tile, side: Side) {
+    if (busy.current) return;
+    busy.current = true;
     setPending(true);
     try {
       await playTile({ roomId: room.id, sessionId, tileId: tile.id, targetSide: side });
       select(null);
-      navigator.vibrate?.(12);
+      buzz(12);
     } catch (e) {
       showToast(errorMessage(e));
     } finally {
+      busy.current = false;
       setPending(false);
     }
   }
@@ -173,19 +184,23 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   };
 
   async function onDrawOrPass() {
+    if (busy.current) return;
+    busy.current = true;
     setPending(true);
     try {
       await drawOrPass({ roomId: room.id, sessionId });
     } catch (e) {
       showToast(errorMessage(e));
     } finally {
+      busy.current = false;
       setPending(false);
     }
   }
 
   // Opponents sit around the table in turn order: next player on the right,
   // partner (or the only opponent) across, previous player on the left.
-  const racks: RackSpec[] = others.map((o) => {
+  // (When watching a CPU match the south seat's tiles are shown face up instead.)
+  const racks: RackSpec[] = others.filter((o) => o.seatIndex !== mySeat).map((o) => {
     const rel = (o.seatIndex - mySeat + seats.length) % seats.length;
     const side = seats.length === 2 ? "north" : rel === 1 ? "east" : rel === 2 ? "north" : "west";
     return { side, count: o.tileCount, active: room.status === "playing" && room.currentTurnSeat === o.seatIndex };
@@ -240,7 +255,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   useEffect(() => {
     if (isMyTurn && !wasMyTurn.current) {
       if (!muted) playSfx("turn");
-      navigator.vibrate?.(20);
+      buzz(20);
     }
     wasMyTurn.current = isMyTurn;
   }, [isMyTurn, muted]);
@@ -388,7 +403,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         {/* Two-player games show the opponent inside the tally above. */}
         {isTeams && (
         <div className={compact ? "absolute left-2 top-12 flex w-32 flex-col gap-1" : "no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1"}>
-          {others.map((o) => (
+          {others.filter((o) => o.seatIndex !== mySeat).map((o) => (
             <OpponentChip
               key={o.seatIndex}
               seat={o}
@@ -413,7 +428,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             zoom={zoom}
             racks={racks}
             drinks={drinks}
-            myTurn={isMyTurn}
+            myTurn={isMyTurn || (!!spectator && room.status === "playing" && room.currentTurnSeat === mySeat)}
             onReady={onSceneReady}
             hand={handSpecs}
             onHandTap={onHandTap}
@@ -490,7 +505,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
                 role="menu"
                 aria-label={t("Reactions")}
               >
-                {REACTIONS.map((r) => (
+                {REACTIONS.filter((r) => r !== (me?.drink ? DRINK_REACTION : NO_DRINK_REACTION)).map((r) => (
                   <button
                     key={r}
                     role="menuitem"
@@ -507,6 +522,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
                 ))}
               </div>
             )}
+            {me && (
             <button
               onClick={() => setReactionsOpen((v) => !v)}
               className={`size-9 rounded-full text-sm ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`}
@@ -515,6 +531,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             >
               💬
             </button>
+            )}
             <button
               onClick={() => {
                 unlockAudio();
@@ -558,12 +575,12 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             </li>
           ))}
         </ul>
-        <div className={`flex justify-center px-3 ${compact ? "pb-1" : "min-h-3 pb-2 pt-2"}`}>
+        <div className={compact ? "flex px-3 pb-1.5" : "flex min-h-3 justify-center px-3 pb-2 pt-2"}>
           {me?.canDrawOrPass && (
             <button
               disabled={pending}
               onClick={onDrawOrPass}
-              className="turn-pulse h-12 w-full max-w-sm rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50"
+              className={`turn-pulse rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50 ${compact ? "h-10 shadow-lg" : "h-12 w-full max-w-sm"}`}
             >
               {me.willDraw ? t("Draw ({n})", { n: room.boneyardCount }) : t("Pass")}
             </button>
@@ -724,10 +741,10 @@ function RoundOverSheet({
   onNext: () => void;
   teamScore: (team: number) => number;
 }) {
-  const { room, me } = state;
+  const { room, me, spectator } = state;
   const t = useT();
   const winner = seats.find((s) => s.seatIndex === room.winnerSeat);
-  const isTeams = room.matchType === "2v2";
+  const isTeams = isTeamMatch(room.matchType);
   const iWon = !!winner && !!me && (isTeams ? winner.team === me.team : winner.isMe);
   const teamName = (team: number | null | undefined) => t("Team {x}", { x: team === 0 ? "A" : "B" });
 
@@ -805,7 +822,7 @@ function RoundOverSheet({
           ))}
         </ul>
 
-        {me?.isHost && (
+        {(me?.isHost || (spectator?.isHost && room.matchOver)) && (
           <details className="mt-3 rounded-xl bg-white/5 px-3 py-2">
             <summary className="cursor-pointer text-sm text-stone-300">{t("House rules for the next round")}</summary>
             <div className="mt-3 space-y-3 pb-1">
@@ -815,7 +832,9 @@ function RoundOverSheet({
           </details>
         )}
 
-        {me?.canStart ? (
+        {spectator && !room.matchOver ? (
+          <p className="mt-4 text-center text-sm text-stone-300">{t("Next round starts in a moment…")}</p>
+        ) : me?.canStart || spectator?.isHost ? (
           <button
             onClick={onNext}
             className="mt-4 h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 active:scale-[0.98]"
@@ -894,4 +913,11 @@ function ReactionBubbles({ seats, mySeat, muted }: { seats: Seat[]; mySeat: numb
       })}
     </div>
   );
+}
+
+/** A short vibration. Browsers refuse it before the first tap, so it waits for one. */
+function buzz(ms: number) {
+  const nav = navigator as Navigator & { userActivation?: { hasBeenActive: boolean } };
+  if (nav.userActivation && !nav.userActivation.hasBeenActive) return;
+  nav.vibrate?.(ms);
 }
