@@ -6,6 +6,7 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { memo, useMemo, useState } from "react";
 import * as THREE from "three";
 import { PIP_LAYOUT } from "@/lib/pips";
+import { contactShadowTexture, IVORY, ivoryTint, pipTexture } from "./materials";
 
 export const TILE_WIDTH = 1;
 export const TILE_HEIGHT = 0.25;
@@ -15,12 +16,29 @@ const PIP_SPACING = 0.27;
 const TOP = TILE_HEIGHT / 2;
 
 // Shared geometry and materials: every tile on the table reuses these.
-const pipGeometry = new THREE.CylinderGeometry(0.085, 0.075, 0.03, 20);
-const pipMaterial = new THREE.MeshStandardMaterial({ color: "#16161a", roughness: 0.55, metalness: 0.1 });
-const dividerGeometry = new THREE.BoxGeometry(0.78, 0.012, 0.035);
-const dividerMaterial = new THREE.MeshStandardMaterial({ color: "#3b3a38", roughness: 0.6 });
-const spinnerGeometry = new THREE.CylinderGeometry(0.065, 0.065, 0.022, 24);
-const spinnerMaterial = new THREE.MeshStandardMaterial({ color: "#d4a548", roughness: 0.25, metalness: 0.9 });
+const pipGeometry = new THREE.CylinderGeometry(0.098, 0.098, 0.012, 24);
+const dividerGeometry = new THREE.BoxGeometry(0.8, 0.012, 0.028);
+const dividerMaterial = new THREE.MeshStandardMaterial({ color: "#2c2a27", roughness: 0.7 });
+// A domed brass pin in the middle of the tile.
+const spinnerGeometry = new THREE.SphereGeometry(0.075, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.5, 1);
+const spinnerMaterial = new THREE.MeshStandardMaterial({ color: "#e0b050", roughness: 0.18, metalness: 1 });
+const shadowGeometry = new THREE.PlaneGeometry(TILE_WIDTH * 1.62, TILE_LENGTH * 1.42).rotateX(-Math.PI / 2);
+
+let pipMaterials: THREE.Material[] | null = null;
+/** Side, top and bottom of a pip. The top carries the painted dimple. */
+function getPipMaterials() {
+  if (!pipMaterials) {
+    const side = new THREE.MeshStandardMaterial({ color: "#8f8672", roughness: 0.6 });
+    const top = new THREE.MeshPhysicalMaterial({ map: pipTexture(), roughness: 0.3, clearcoat: 0.8, clearcoatRoughness: 0.2 });
+    pipMaterials = [side, top, side];
+  }
+  return pipMaterials;
+}
+let shadowMaterialBase: THREE.MeshBasicMaterial | null = null;
+function getShadowMaterial() {
+  shadowMaterialBase ??= new THREE.MeshBasicMaterial({ color: "#000", alphaMap: contactShadowTexture(), transparent: true, depthWrite: false, opacity: 0.7 });
+  return shadowMaterialBase;
+}
 
 function Pips({ value, half }: { value: number; half: -1 | 1 }) {
   return (
@@ -29,9 +47,9 @@ function Pips({ value, half }: { value: number; half: -1 | 1 }) {
         <mesh
           key={i}
           geometry={pipGeometry}
-          material={pipMaterial}
-          // Slightly sunk into the face so it reads as an inlaid pip.
-          position={[c * PIP_SPACING, TOP - 0.008, half * 0.5 + r * PIP_SPACING]}
+          material={getPipMaterials()}
+          // Flush with the face: the painted top makes it read as a drilled dimple.
+          position={[c * PIP_SPACING, TOP - 0.004, half * 0.5 + r * PIP_SPACING]}
         />
       ))}
     </>
@@ -44,7 +62,7 @@ export function TileBody({ a, b, material }: { a: number; b: number; material: T
     <>
       <RoundedBox args={[TILE_WIDTH, TILE_HEIGHT, TILE_LENGTH]} radius={0.06} smoothness={4} material={material} castShadow receiveShadow />
       <mesh geometry={dividerGeometry} material={dividerMaterial} position={[0, TOP + 0.001, 0]} />
-      <mesh geometry={spinnerGeometry} material={spinnerMaterial} position={[0, TOP + 0.004, 0]} />
+      <mesh geometry={spinnerGeometry} material={spinnerMaterial} position={[0, TOP, 0]} />
       <Pips value={a} half={-1} />
       <Pips value={b} half={1} />
     </>
@@ -92,18 +110,17 @@ export const DominoTile = memo(function DominoTile({
   const bodyMaterial = useMemo(
     () =>
       new THREE.MeshPhysicalMaterial({
-        color: ghost ? "#fff6c9" : "#f6f1e4",
-        roughness: 0.32,
-        clearcoat: 0.6,
-        clearcoatRoughness: 0.25,
-        sheen: 0.2,
+        ...IVORY,
+        color: ghost ? "#fff6c9" : ivoryTint(a, b),
         transparent: ghost,
         opacity: ghost ? 0.7 : 1,
         emissive: ghost || highlight ? "#f0c86b" : "#000000",
-        emissiveIntensity: ghost ? (hovered ? 0.8 : 0.5) : highlight ? 0.18 : 0,
+        emissiveIntensity: ghost ? (hovered ? 0.8 : 0.5) : highlight ? 0.14 : 0,
       }),
-    [ghost, highlight, hovered],
+    [a, b, ghost, highlight, hovered],
   );
+  // The dark crease under a tile resting on the felt. It fades in as the tile lands.
+  const shadow = useSpring({ from: { scale: dropIn ? 2.2 : 1 }, to: { scale: 1 }, config: { mass: 1, tension: 210, friction: 22 } });
 
   const handlers = onSelect
     ? {
@@ -124,6 +141,18 @@ export const DominoTile = memo(function DominoTile({
     : {};
 
   return (
+    <>
+    {!ghost && (
+      <animated.mesh
+        geometry={shadowGeometry}
+        material={getShadowMaterial()}
+        // Nudged away from the lamp, which stands toward the player's right.
+        position={[x - 0.05, 0.006, z - 0.07]}
+        rotation-y={rotationY}
+        scale={shadow.scale}
+        renderOrder={1}
+      />
+    )}
     <animated.group
       position={spring.position as unknown as [number, number, number]}
       rotation={spring.rotation as unknown as [number, number, number]}
@@ -138,5 +167,6 @@ export const DominoTile = memo(function DominoTile({
         )}
       </group>
     </animated.group>
+    </>
   );
 });

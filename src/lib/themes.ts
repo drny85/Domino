@@ -78,6 +78,11 @@ function felt(ctx: CanvasRenderingContext2D, s: number, inner: string, mid: stri
   g.addColorStop(1, outer);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, s, s);
+  // A stitched gold line just inside the rail, as on a tournament cloth.
+  ctx.strokeStyle = "rgba(236,204,128,0.6)";
+  ctx.lineWidth = s * 0.003;
+  const inset = s * 0.04;
+  ctx.strokeRect(inset, inset, s - inset * 2, s - inset * 2);
 }
 
 /** Mowed outfield grass, a chalk diamond and a team-colored warning track. */
@@ -400,9 +405,9 @@ function festive(flag: (ctx: CanvasRenderingContext2D, s: number) => void, label
 // ---------------------------------------------------------------------------
 
 export const THEMES: TableTheme[] = [
-  { id: "classic", name: "Classic felt", group: "Classic", rim: "#5a3420", shade: 0, draw: (c, s) => felt(c, s, "#1d6a4a", "#155038", "#0d3526") },
-  { id: "navy-felt", name: "Midnight felt", group: "Classic", rim: "#2b2b30", shade: 0, draw: (c, s) => felt(c, s, "#24406e", "#1a2f52", "#0f1c33") },
-  { id: "burgundy", name: "Casino red", group: "Classic", rim: "#3b2416", shade: 0, draw: (c, s) => felt(c, s, "#7a1f2b", "#5c1620", "#3a0d14") },
+  { id: "classic", name: "Classic felt", group: "Classic", rim: "#5a3420", shade: 0, draw: (c, s) => felt(c, s, "#2c9363", "#237c52", "#1a6341") },
+  { id: "navy-felt", name: "Midnight felt", group: "Classic", rim: "#2b2b30", shade: 0, draw: (c, s) => felt(c, s, "#30569a", "#26467f", "#1c3564") },
+  { id: "burgundy", name: "Casino red", group: "Classic", rim: "#3b2416", shade: 0, draw: (c, s) => felt(c, s, "#a52a39", "#8a2130", "#6c1825") },
   { id: "wood", name: "Wood table", group: "Classic", rim: "#3d2312", shade: 0, draw: (c, s) => {
     c.fillStyle = "#8a5a35";
     c.fillRect(0, 0, s, s);
@@ -450,7 +455,7 @@ export function paintTheme(theme: TableTheme, canvas: HTMLCanvasElement, size: n
   }
   const v = ctx.createRadialGradient(size / 2, size / 2, size * 0.25, size / 2, size / 2, size * 0.52);
   v.addColorStop(0, "rgba(0,0,0,0)");
-  v.addColorStop(1, "rgba(0,0,0,0.35)");
+  v.addColorStop(1, "rgba(0,0,0,0.12)");
   ctx.fillStyle = v;
   ctx.fillRect(0, 0, size, size);
   if (grain) {

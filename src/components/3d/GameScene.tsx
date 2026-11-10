@@ -3,6 +3,7 @@
 import { Environment, Lightformer } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
+import * as THREE from "three";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
 import { footprint, layoutBoard } from "@/lib/boardLayout";
@@ -14,6 +15,7 @@ import { DominoTile } from "./DominoTile";
 import { HandRack, type HandTileSpec } from "./HandRack";
 import { Drink } from "./Drink";
 import { OpponentRack, type RackSide, type RackSpec } from "./OpponentRack";
+import { SceneProps } from "./SceneProps";
 import { Table } from "./Table";
 
 export type GhostSpec = { side: Side; tile: Tile };
@@ -130,36 +132,43 @@ export default function GameScene(props: SceneProps) {
       resize={{ offsetSize: true }}
       // A tight depth range keeps close surfaces from shimmering at a distance.
       camera={{ fov: 42, position: [0, 14, 8], near: 2, far: 160 }}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+      gl={{ antialias: true, powerPreference: "high-performance", toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
       style={{ touchAction: "none" }}
     >
       <color attach="background" args={[scene.haze]} />
       <fog attach="fog" args={[scene.haze, 55, 95]} />
-      <ambientLight intensity={0.18 + scene.ambient} />
-      {/* Key light: a lamp above and slightly behind the player, casting soft shadows. */}
+      {/* Sky light from above, warm bounce from the floor below. */}
+      <hemisphereLight args={["#fff6e6", "#6b4a30", 0.35 + scene.ambient]} />
+      {/* Key light: above and slightly behind the player, casting soft shadows. */}
       <directionalLight
         position={[7, 18, 9]}
-        intensity={2.3}
+        intensity={2.2}
         color={scene.sun}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.03}
-        shadow-radius={5}
+        shadow-radius={6}
       >
-        <orthographicCamera attach="shadow-camera" args={[-17, 17, 17, -17, 1, 60]} />
+        <orthographicCamera attach="shadow-camera" args={[-16, 16, 16, -16, 1, 60]} />
       </directionalLight>
-      <directionalLight position={[-8, 10, -6]} intensity={0.35} color="#ffe2b0" />
-      <pointLight position={[0, 9, 0]} intensity={40} distance={30} decay={2} color="#ffd9a0" />
+      {/* The lamp over the table: a warm pool on the felt that falls off toward the rails. */}
+      <spotLight position={[0, 15, 1]} angle={0.72} penumbra={0.9} intensity={150} decay={2} distance={40} color="#ffe8c4" />
+      {/* Low light from the player's side, so the faces of their own tiles read bright. */}
+      <directionalLight position={[0, 9, 22]} intensity={0.7} color="#fff3e0" />
+      <directionalLight position={[-8, 10, -6]} intensity={0.4} color="#ffe2b0" />
       <Suspense fallback={null}>
         {/* Procedural studio lighting: no HDR files are downloaded. */}
-        <Environment resolution={64} frames={1}>
-          <Lightformer form="rect" intensity={1.1} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[12, 12, 1]} />
-          <Lightformer form="rect" intensity={0.8} position={[-6, 2, 4]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#ffe6c0" />
-          <Lightformer form="ring" intensity={0.6} position={[6, 3, -4]} scale={4} color="#c8f0ff" />
+        <Environment resolution={256} frames={1}>
+          <color attach="background" args={["#2a241e"]} />
+          <Lightformer form="rect" intensity={1.3} position={[0, 7, 0]} rotation-x={Math.PI / 2} scale={[14, 10, 1]} color="#fff4e2" />
+          <Lightformer form="rect" intensity={0.8} position={[-8, 3, 4]} rotation-y={Math.PI / 2} scale={[10, 3, 1]} color="#ffe6c0" />
+          <Lightformer form="rect" intensity={0.7} position={[8, 3, -2]} rotation-y={-Math.PI / 2} scale={[10, 3, 1]} color="#dff0ff" />
+          <Lightformer form="rect" intensity={0.6} position={[0, 3, 10]} rotation-y={Math.PI} scale={[12, 3, 1]} color="#ffffff" />
         </Environment>
       </Suspense>
       <Table />
+      <SceneProps sceneId={scene.id} />
       <OpponentRack side="south" count={0} active={props.myTurn} />
       {props.racks.map((r) => (
         <OpponentRack key={r.side} {...r} />

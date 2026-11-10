@@ -1,12 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import * as THREE from "three";
+import { tileBackGeometry, tileBackMaterial } from "./materials";
 import { TILE_HEIGHT } from "./DominoTile";
 import { SURFACE_SIZE } from "./Table";
 
-const geometry = new THREE.BoxGeometry(0.96, TILE_HEIGHT, 1.96);
-const material = new THREE.MeshPhysicalMaterial({ color: "#f3eee0", roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 });
 
 const PER_STACK = 4;
 
@@ -32,7 +30,7 @@ export function BoneyardPile({ count }: { count: number }) {
   return (
     <group>
       {tiles.slice(0, Math.min(count, tiles.length)).map((t, i) => (
-        <mesh key={i} geometry={geometry} material={material} position={t.position} rotation={[0, t.rotation, 0]} castShadow receiveShadow />
+        <mesh key={i} geometry={tileBackGeometry(0.96, TILE_HEIGHT, 1.96)} material={tileBackMaterial()} position={t.position} rotation={[0, t.rotation, 0]} castShadow receiveShadow />
       ))}
     </group>
   );

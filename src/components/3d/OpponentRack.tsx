@@ -2,7 +2,7 @@
 
 import { animated, useSpring } from "@react-spring/three";
 import { useMemo } from "react";
-import * as THREE from "three";
+import { tileBackGeometry, tileBackMaterial } from "./materials";
 import { RACK_LENGTH, RACK_Y, RACK_Z } from "./Table";
 
 export type RackSide = "north" | "east" | "west" | "south";
@@ -10,8 +10,6 @@ export type RackSpec = { side: RackSide; count: number; active: boolean };
 
 const ROTATION: Record<RackSide, number> = { north: Math.PI, east: Math.PI / 2, west: -Math.PI / 2, south: 0 };
 
-const tileGeometry = new THREE.BoxGeometry(0.96, 2, 0.25);
-const tileMaterial = new THREE.MeshPhysicalMaterial({ color: "#f3eee0", roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 });
 
 /**
  * An opponent's hand: one face-down tile per tile they hold, standing on the
@@ -28,7 +26,7 @@ export function OpponentRack({ side, count, active }: RackSpec) {
       <group position={[0, RACK_Y, RACK_Z]}>
         {tiles.map((x, i) => (
           // Leaning back slightly against the rack's ledge, backs toward the table.
-          <mesh key={i} geometry={tileGeometry} material={tileMaterial} position={[x, 0.98, 0.18]} rotation={[0.2, 0, 0]} castShadow receiveShadow />
+          <mesh key={i} geometry={tileBackGeometry(0.96, 2, 0.25)} material={tileBackMaterial()} position={[x, 0.98, 0.18]} rotation={[0.2, 0, 0]} castShadow receiveShadow />
         ))}
         {/* Turn light: a brass strip in front of the rack glows for the player to move. */}
         <mesh position={[0, 0.03, -0.95]}>

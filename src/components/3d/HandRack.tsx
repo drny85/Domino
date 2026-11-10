@@ -5,6 +5,7 @@ import { type ThreeEvent, useThree } from "@react-three/fiber";
 import { memo, useMemo } from "react";
 import * as THREE from "three";
 import { TILE_LENGTH, TileBody } from "./DominoTile";
+import { IVORY, ivoryTint } from "./materials";
 import { RACK_LENGTH, RACK_Y, RACK_Z } from "./Table";
 
 export type HandTileSpec = {
@@ -38,14 +39,12 @@ const HandTile = memo(function HandTile({
   const material = useMemo(
     () =>
       new THREE.MeshPhysicalMaterial({
-        color: tile.dim ? "#8f8b82" : "#f6f1e4",
-        roughness: 0.32,
-        clearcoat: 0.6,
-        clearcoatRoughness: 0.25,
+        ...IVORY,
+        color: tile.dim ? "#c2bcae" : ivoryTint(tile.a, tile.b),
         emissive: tile.selected ? "#f0c86b" : tile.playable ? "#caa24a" : "#000000",
         emissiveIntensity: tile.selected ? 0.35 : tile.playable ? 0.1 : 0,
       }),
-    [tile.dim, tile.selected, tile.playable],
+    [tile.a, tile.b, tile.dim, tile.selected, tile.playable],
   );
 
   return (

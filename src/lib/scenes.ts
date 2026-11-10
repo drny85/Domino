@@ -109,29 +109,73 @@ export const SCENES: Scene[] = [
   {
     id: "room",
     name: "Game room",
-    haze: "#120d0a",
-    ambient: 0,
+    haze: "#1f1610",
+    ambient: 0.12,
     sun: "#ffffff",
     floor: (ctx, s) => {
+      // Warm hardwood boards, lit from the lamp over the table.
       const g = ctx.createRadialGradient(s / 2, s / 2, 20, s / 2, s / 2, s / 2);
-      g.addColorStop(0, "#4a3424");
-      g.addColorStop(0.45, "#2a1d15");
-      g.addColorStop(1, "#120d0a");
+      g.addColorStop(0, "#a9744a");
+      g.addColorStop(0.45, "#7a5031");
+      g.addColorStop(1, "#2e1d12");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
-      ctx.strokeStyle = "rgba(0,0,0,0.28)";
-      ctx.lineWidth = 2;
-      for (let x = 0; x <= s; x += s / 45) {
+      const r = rng(17);
+      const board = s / 45;
+      for (let x = 0; x < s; x += board) {
+        // Each board is its own shade, cut to random lengths.
+        ctx.fillStyle = r() > 0.5 ? `rgba(255,220,170,${r() * 0.1})` : `rgba(30,12,4,${r() * 0.16})`;
+        ctx.fillRect(x, 0, board, s);
+        ctx.strokeStyle = "rgba(20,8,2,0.35)";
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, s);
         ctx.stroke();
+        for (let y = r() * s * 0.2; y < s; y += s * (0.08 + r() * 0.14)) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + board, y);
+          ctx.stroke();
+        }
       }
+      // A woven rug under the table and chairs.
+      const rug = s * 0.5;
+      const o = (s - rug) / 2;
+      ctx.fillStyle = "#7c1f24";
+      ctx.beginPath();
+      ctx.roundRect(o, o, rug, rug, s * 0.012);
+      ctx.fill();
+      for (const [inset, color, width] of [
+        [0.012, "#e0b867", 0.004],
+        [0.03, "#2a3d5c", 0.016],
+        [0.05, "#e0b867", 0.003],
+      ] as const) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = s * width;
+        ctx.strokeRect(o + s * inset, o + s * inset, rug - s * inset * 2, rug - s * inset * 2);
+      }
+      // Diamond medallions woven across the middle.
+      ctx.strokeStyle = "rgba(224,184,103,0.55)";
+      ctx.lineWidth = s * 0.002;
+      const step = s * 0.035;
+      for (let x = o + s * 0.075; x < o + rug - s * 0.075; x += step)
+        for (let y = o + s * 0.075; y < o + rug - s * 0.075; y += step) {
+          ctx.beginPath();
+          ctx.moveTo(x + step / 2, y + step * 0.15);
+          ctx.lineTo(x + step * 0.85, y + step / 2);
+          ctx.lineTo(x + step / 2, y + step * 0.85);
+          ctx.lineTo(x + step * 0.15, y + step / 2);
+          ctx.closePath();
+          ctx.stroke();
+        }
+      speckle(ctx, s, 23, 5000, ["rgba(0,0,0,0.06)", "rgba(255,230,190,0.05)"], 2);
+      groundShade(ctx, s, 0.3);
     },
     backdrop: (ctx, w, h) => {
       ctx.fillStyle = vgrad(ctx, 0, h, [
-        [0, "#120d0a"],
-        [1, "#1d140f"],
+        [0, "#1f1610"],
+        [1, "#3a2819"],
       ]);
       ctx.fillRect(0, 0, w, h);
     },
@@ -265,7 +309,7 @@ export const SCENES: Scene[] = [
       ctx.clip();
       speckle(ctx, s, 5, 12000, ["#dcc48c", "#f4e8c8", "#d2b77c"], 2.6);
       ctx.restore();
-      // A towel, a ball and a few shells on the sand.
+      // A towel and a few shells on the sand. The umbrella and ball stand on it in 3D.
       ctx.save();
       ctx.translate(s * 0.2, s * 0.62);
       ctx.rotate(-0.25);
@@ -274,25 +318,6 @@ export const SCENES: Scene[] = [
         ctx.fillRect(0, i * s * 0.012, s * 0.11, s * 0.012);
       }
       ctx.restore();
-      const bx = s * 0.8;
-      const by = s * 0.55;
-      ["#f25c54", "#ffd166", "#3fa7d6", "#ffffff"].forEach((c, i) => {
-        ctx.fillStyle = c;
-        ctx.beginPath();
-        ctx.moveTo(bx, by);
-        ctx.arc(bx, by, s * 0.022, (i * Math.PI) / 2, ((i + 1) * Math.PI) / 2);
-        ctx.fill();
-      });
-      // A beach umbrella seen from above.
-      const ux = s * 0.24;
-      const uy = s * 0.5;
-      for (let i = 0; i < 12; i++) {
-        ctx.fillStyle = i % 2 ? "#ffffff" : "#f4a261";
-        ctx.beginPath();
-        ctx.moveTo(ux, uy);
-        ctx.arc(ux, uy, s * 0.055, (i * Math.PI) / 6, ((i + 1) * Math.PI) / 6);
-        ctx.fill();
-      }
       speckle(ctx, s, 31, 90, ["#fff7ea", "#f6c9b0", "#e9a48b"], 4);
       groundShade(ctx, s, 0.28);
     },
