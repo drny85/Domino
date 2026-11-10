@@ -4,10 +4,13 @@ import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
+import { AvatarPicker } from "@/components/ui/AvatarPicker";
 import { DominoFace } from "@/components/ui/DominoFace";
+import { InstallButton } from "@/components/ui/InstallButton";
 import { ThemeButton } from "@/components/ui/ThemePicker";
 import { useSession } from "@/lib/session";
 import { errorMessage } from "@/store/useGameStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 type MatchType = "1v1" | "2v2" | "cpu";
 type Mode = "draw" | "block";
@@ -28,6 +31,11 @@ export default function Home() {
   const [matchType, setMatchType] = useState<MatchType>("1v1");
   const [mode, setMode] = useState<Mode>("draw");
   const [targetScore, setTargetScore] = useState<100 | 200>(200);
+  const [cpuLevel, setCpuLevel] = useState<"easy" | "normal" | "hard">("normal");
+  const { avatar, setAvatar, stats } = useProfileStore();
+  // Saved choices only exist in the browser; wait for it before showing them.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +52,7 @@ export default function Home() {
     setError(null);
     try {
       setName(name.trim());
-      const res = await createRoom({ sessionId: session.sessionId, playerName: name.trim(), mode, matchType, targetScore });
+      const res = await createRoom({ sessionId: session.sessionId, playerName: name.trim(), mode, matchType, targetScore, avatar, cpuLevel });
       router.push(`/room/${res.code}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -59,7 +67,7 @@ export default function Home() {
     setError(null);
     try {
       setName(name.trim());
-      const res = await joinRoom({ code: code.trim().toUpperCase(), sessionId: session.sessionId, playerName: name.trim() });
+      const res = await joinRoom({ code: code.trim().toUpperCase(), sessionId: session.sessionId, playerName: name.trim(), avatar });
       router.push(`/room/${res.code}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -95,6 +103,14 @@ export default function Home() {
           placeholder="e.g. Robert"
           className="h-12 w-full rounded-xl border border-white/10 bg-black/30 px-4 text-base outline-none placeholder:text-stone-500 focus:border-brass"
         />
+        {mounted && <AvatarPicker value={avatar} onChange={setAvatar} />}
+        {mounted && stats.roundsWon + stats.roundsLost > 0 && (
+          <p className="text-xs text-stone-400">
+            Your record: <b className="text-stone-200">{stats.matchesWon}</b> matches won, {stats.matchesLost} lost · {stats.roundsWon} rounds won
+            {stats.capicuas > 0 && <> · {stats.capicuas} capicúas</>}
+            {stats.bestStreak > 1 && <> · best streak {stats.bestStreak}</>}
+          </p>
+        )}
       </section>
 
       <section className="space-y-3">
@@ -152,6 +168,27 @@ export default function Home() {
           </div>
         </div>
 
+        {matchType === "cpu" && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-stone-300">CPU level</span>
+            <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="CPU level">
+              {(["easy", "normal", "hard"] as const).map((lv) => (
+                <button
+                  key={lv}
+                  role="radio"
+                  aria-checked={cpuLevel === lv}
+                  onClick={() => setCpuLevel(lv)}
+                  className={`h-9 rounded-lg px-3 text-sm font-semibold capitalize transition ${
+                    cpuLevel === lv ? "bg-white/15 text-white" : "text-stone-400"
+                  }`}
+                >
+                  {lv}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <p className="text-xs text-stone-400">
           {mode === "draw"
             ? "Can't play? Draw from the boneyard until you can."
@@ -198,6 +235,7 @@ export default function Home() {
       )}
 
       <footer className="mt-auto pb-2 text-center text-xs text-stone-500">
+        <InstallButton />
         {!ready && session && <p className="mb-2">Enter a name to start.</p>}
         <button onClick={newTabIdentity} className="underline decoration-dotted underline-offset-4">
           {session?.isTabIdentity ? "Using a separate identity in this tab" : "Testing? Use a separate player in this tab"}

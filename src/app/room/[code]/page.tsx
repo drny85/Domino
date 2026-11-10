@@ -9,6 +9,7 @@ import { GameView } from "@/components/ui/GameView";
 import { WaitingRoom } from "@/components/ui/WaitingRoom";
 import { useSession } from "@/lib/session";
 import { errorMessage } from "@/store/useGameStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 const HEARTBEAT_MS = 10_000;
 
@@ -32,6 +33,8 @@ export default function RoomPage() {
   );
   const heartbeat = useMutation(api.games.heartbeat);
   const joinRoom = useMutation(api.games.joinRoom);
+  const setAvatar = useMutation(api.games.setAvatar);
+  const avatar = useProfileStore((s) => s.avatar);
 
   const [name, setLocalName] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -56,6 +59,12 @@ export default function RoomPage() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [roomId, sessionId, seated, heartbeat]);
+
+  // Keep the seat's avatar in step with the one picked on this device.
+  const seatAvatar = state?.me?.avatar;
+  useEffect(() => {
+    if (roomId && sessionId && seated && avatar && seatAvatar !== avatar) void setAvatar({ roomId, sessionId, avatar }).catch(() => {});
+  }, [roomId, sessionId, seated, avatar, seatAvatar, setAvatar]);
 
   if (roomInfo === undefined || !session || (roomInfo && state === undefined)) {
     return (
@@ -95,7 +104,7 @@ export default function RoomPage() {
               setJoinError(null);
               try {
                 setName(name.trim());
-                await joinRoom({ code, sessionId: session.sessionId, playerName: name.trim() });
+                await joinRoom({ code, sessionId: session.sessionId, playerName: name.trim(), avatar });
               } catch (err) {
                 setJoinError(errorMessage(err));
               } finally {

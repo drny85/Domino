@@ -61,7 +61,7 @@ describe("information hiding", () => {
     expect(s!.room.boneyardCount).toBe(0);
     for (const o of s!.opponents) {
       expect(Object.keys(o).sort()).toEqual(
-        ["finalPips", "id", "isBot", "isConnected", "name", "score", "seatIndex", "team", "tileCount"].sort(),
+        ["avatar", "finalPips", "id", "isBot", "isConnected", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
       );
       expect(o.tileCount).toBe(7);
     }
@@ -275,4 +275,46 @@ describe("points to win", () => {
     }
     throw new Error(`match did not finish after ${rounds} rounds`);
   }, 60000);
+});
+
+describe("house rules and table extras", () => {
+  it("only the host changes the rules, and they show in the state", async () => {
+    const { t, roomId } = await setupRoom(2);
+    await expect(t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(1), bonuses: true })).rejects.toThrow(/host/);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true, turnSeconds: 20, cpuLevel: "hard" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(s.room.bonuses).toBe(true);
+    expect(s.room.turnSeconds).toBe(20);
+    expect(s.room.cpuLevel).toBe("hard");
+  });
+
+  it("accepts listed reactions and avatars only", async () => {
+    const { t, roomId, code } = await setupRoom(1);
+    await t.mutation(api.games.joinRoom, { code, sessionId: S(1), playerName: "P1", avatar: "🦁" });
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: S(1), reaction: "<b>hi</b>" })).rejects.toThrow(/Unknown/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: S(1), reaction: "¡Capicúa!" });
+    await t.mutation(api.games.setAvatar, { roomId, sessionId: S(0), avatar: "not-an-avatar" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.opponents[0].reaction?.text).toBe("¡Capicúa!");
+    expect(s.opponents[0].avatar).toBe("🦁");
+    expect(s.me!.avatar).toBeNull();
+  });
+
+  it.each([20, 0] as const)("plays for players who run out of time or drop off (timer %i)", async (turnSeconds) => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const first = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(first.room.turnDeadline === null).toBe(turnSeconds === 0);
+    // Nobody touches the game: the server finishes the round on its own.
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.status).toBe("finished");
+    expect(s.room.lastAction?.auto).toBe(true);
+    expect(s.room.lastRound).not.toBeNull();
+    // With the host gone, another player may deal the next round.
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(1) });
+    vi.useRealTimers();
+  });
 });

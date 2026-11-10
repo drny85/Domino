@@ -14,6 +14,8 @@ export const boardTileValidator = v.object({
 
 export const modeValidator = v.union(v.literal("draw"), v.literal("block"));
 export const targetScoreValidator = v.union(v.literal(100), v.literal(200));
+export const cpuLevelValidator = v.union(v.literal("easy"), v.literal("normal"), v.literal("hard"));
+export const turnSecondsValidator = v.union(v.literal(0), v.literal(20), v.literal(30));
 export const matchTypeValidator = v.union(v.literal("1v1"), v.literal("2v2"), v.literal("cpu"));
 
 export default defineSchema({
@@ -37,8 +39,29 @@ export default defineSchema({
     round: v.optional(v.number()),
     consecutivePasses: v.optional(v.number()),
     lastAction: v.optional(
-      v.object({ seatIndex: v.number(), kind: v.string(), tileId: v.optional(v.string()), at: v.number() }),
+      v.object({
+        seatIndex: v.number(),
+        kind: v.string(),
+        tileId: v.optional(v.string()),
+        at: v.number(),
+        // True when the server played for an absent or timed-out player.
+        auto: v.optional(v.boolean()),
+      }),
     ),
+    // Host options.
+    turnSeconds: v.optional(turnSecondsValidator),
+    bonuses: v.optional(v.boolean()),
+    cpuLevel: v.optional(cpuLevelValidator),
+    // Turn clock: `turnId` grows every time the turn moves on.
+    turnId: v.optional(v.number()),
+    timerTurnId: v.optional(v.number()),
+    turnDeadline: v.optional(v.number()),
+    // Per seat: numbers that player could not match this round (public knowledge).
+    voids: v.optional(v.array(v.array(v.number()))),
+    lastRound: v.optional(
+      v.object({ points: v.number(), bonus: v.number(), bonusKind: v.optional(v.string()) }),
+    ),
+    bonusEvent: v.optional(v.object({ seatIndex: v.number(), kind: v.string(), points: v.number(), at: v.number() })),
   }).index("by_code", ["code"]),
 
   players: defineTable({
@@ -51,6 +74,8 @@ export default defineSchema({
     isBot: v.optional(v.boolean()),
     // Heartbeat timestamp used to derive `isConnected`.
     lastSeen: v.optional(v.number()),
+    avatar: v.optional(v.string()),
+    reaction: v.optional(v.object({ text: v.string(), at: v.number() })),
   })
     .index("by_room", ["roomId"])
     .index("by_room_session", ["roomId", "sessionId"]),

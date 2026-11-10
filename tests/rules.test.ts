@@ -137,3 +137,28 @@ describe("blocked games and scoring", () => {
     expect(roundPoints([[], [t(1, 2)], [t(6, 6)]], 0)).toBe(15);
   });
 });
+
+describe("bonuses and CPU levels", () => {
+  it("recognises a capicúa", async () => {
+    const { isCapicua } = await import("../convex/lib/rules");
+    expect(isCapicua({ id: "2-5", a: 2, b: 5 }, { left: 5, right: 2 })).toBe(true);
+    expect(isCapicua({ id: "2-5", a: 2, b: 5 }, { left: 5, right: 3 })).toBe(false);
+    expect(isCapicua({ id: "4-4", a: 4, b: 4 }, { left: 4, right: 4 })).toBe(false);
+  });
+
+  it("every level returns a legal move, and hard blocks a number the opponent lacks", async () => {
+    const { chooseCpuMoveForLevel, validSides, placeTile } = await import("../convex/lib/rules");
+    const board = placeTile({ id: "3-4", a: 3, b: 4 }, "root", [], { left: null, right: null });
+    const hand = [
+      { id: "4-6", a: 4, b: 6 },
+      { id: "1-4", a: 1, b: 4 },
+      { id: "0-2", a: 0, b: 2 },
+    ];
+    for (const level of ["easy", "normal", "hard"] as const) {
+      const m = chooseCpuMoveForLevel(level, hand, board.board, board.openEnds)!;
+      expect(validSides(hand.find((x) => x.id === m.tileId)!, board.board, board.openEnds)).toContain(m.side);
+    }
+    expect(chooseCpuMoveForLevel("hard", hand, board.board, board.openEnds, [1])!.tileId).toBe("1-4");
+    expect(chooseCpuMoveForLevel("easy", [{ id: "0-0", a: 0, b: 0 }], board.board, board.openEnds)).toBeNull();
+  });
+});

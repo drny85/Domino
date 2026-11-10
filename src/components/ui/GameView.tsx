@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
-import type { Side, Tile } from "../../../convex/lib/rules";
+import { REACTIONS, type Side, type Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
 import { playSfx, unlockAudio } from "@/lib/sound";
@@ -13,7 +13,9 @@ import { releaseLandscape, tryLockLandscape, useGameViewport } from "@/lib/useGa
 import type { GameState } from "@/lib/types";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { DominoFace } from "./DominoFace";
+import { RoomOptions } from "./RoomOptions";
 import { TargetScoreToggle } from "./TargetScoreToggle";
 import { ThemeButton } from "./ThemePicker";
 
@@ -36,6 +38,8 @@ type Seat = {
   isConnected: boolean;
   isBot: boolean;
   finalPips: number | null;
+  avatar: string | null;
+  reaction: { text: string; at: number } | null;
 };
 
 export function GameView({ state, sessionId }: { state: GameState; sessionId: string }) {
@@ -43,6 +47,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   const playTile = useMutation(api.games.playTile);
   const drawOrPass = useMutation(api.games.drawOrPass);
   const startGame = useMutation(api.games.startGame);
+  const sendReaction = useMutation(api.games.sendReaction);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const recordRound = useProfileStore((st) => st.recordRound);
 
   const { selectedTileId, select, toast, showToast, clearToast, pending, setPending } = useGameStore();
   const [zoom, setZoom] = useState(1);
@@ -68,6 +75,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         isConnected: true,
         isBot: false,
         finalPips: me.finalPips,
+        avatar: me.avatar,
+        reaction: me.reaction,
       });
     }
     return list.sort((a, b) => a.seatIndex - b.seatIndex);
@@ -193,9 +202,20 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastActionAt]);
 
+  const bonusAt = room.bonusEvent?.at ?? 0;
+  const seenBonus = useRef(bonusAt);
+  useEffect(() => {
+    const b = room.bonusEvent;
+    if (!b || b.at === seenBonus.current) return;
+    seenBonus.current = b.at;
+    const who = seats.find((x) => x.seatIndex === b.seatIndex);
+    setBanner({ id: b.at, text: `Everyone passed! +${b.points} ${who?.isMe ? "for you" : `for ${who?.name ?? "them"}`}` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bonusAt]);
+
   useEffect(() => {
     if (!banner) return;
-    const id = setTimeout(() => setBanner(null), 1500);
+    const id = setTimeout(() => setBanner(null), 1900);
     return () => clearTimeout(id);
   }, [banner]);
 
@@ -218,6 +238,17 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       setTimeout(() => playSfx(mine ? "win" : "lose"), 350);
     }
     announcedRound.current = finishedRound;
+    if (finishedRound && me) {
+      const winner = seats.find((x) => x.seatIndex === room.winnerSeat);
+      recordRound({
+        key: `${room.id}:${room.round}:${room.board.length}`,
+        tie: !winner,
+        won: !!winner && (isTeams ? winner.team === me.team : winner.isMe),
+        capicua: room.lastRound?.bonusKind === "capicua",
+        matchOver: room.matchOver,
+        wonMatch: room.matchOver && room.matchWinnerTeam === me.team,
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedRound]);
 
@@ -229,9 +260,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     if (!a) return null;
     const who = bySeat(a.seatIndex);
     const name = who?.isMe ? "You" : (who?.name ?? "Someone");
-    if (a.kind === "draw") return `${name} drew a tile`;
-    if (a.kind === "pass") return `${name} passed`;
-    if (a.kind === "play" && a.tileId) return `${name} played ${a.tileId}`;
+    const forWhom = a.auto ? ` (auto, ${who?.isMe ? "you were" : "they were"} away or out of time)` : "";
+    if (a.kind === "draw") return `${name} drew a tile${forWhom}`;
+    if (a.kind === "pass") return `${name} passed${forWhom}`;
+    if (a.kind === "play" && a.tileId) return `${name} played ${a.tileId}${forWhom}`;
     return null;
   })();
 
@@ -250,7 +282,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               : "Your turn"
         : current?.isBot
           ? "CPU is thinking…"
-          : `${current?.name ?? "…"}'s turn`;
+          : current && !current.isConnected
+            ? `${current.name} is away: playing for them…`
+            : `${current?.name ?? "…"}'s turn`;
+  const secondsLeft = useCountdown(room.status === "playing" ? room.turnDeadline : null);
 
   // The tally: my side first, then the other side (teams in 2v2).
   const myTeam = me?.team ?? 0;
@@ -266,7 +301,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     : [...seats]
         .sort((a, b) => Number(b.isMe) - Number(a.isMe))
         .map((s) => ({
-          label: s.isMe ? "You" : s.name,
+          label: `${s.avatar ? `${s.avatar} ` : ""}${s.isMe ? "You" : s.name}`,
           score: s.score,
           mine: s.isMe,
           tiles: s.tileCount,
@@ -394,6 +429,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             Ends <b className="text-white">{room.openEnds.left}</b> · <b className="text-white">{room.openEnds.right}</b>
           </div>
         )}
+        <ReactionBubbles seats={seats} mySeat={mySeat} muted={muted} />
         {!sceneReady && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-felt-900">
             <div className="size-8 animate-spin rounded-full border-2 border-white/20 border-t-brass" />
@@ -415,8 +451,44 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             className={`size-2.5 rounded-full ${me?.isMyTurn ? "turn-pulse bg-brass-light" : "bg-stone-600"}`}
             aria-hidden
           />
-          <p className={`min-w-0 truncate text-sm font-semibold ${compact ? "mr-auto rounded-full bg-black/45 px-3 py-1 backdrop-blur" : "flex-1"}`}>{turnText}</p>
-<div className="flex shrink-0 gap-1">
+          <p className={`min-w-0 truncate text-sm font-semibold ${compact ? "mr-auto rounded-full bg-black/45 px-3 py-1 backdrop-blur" : "flex-1"}`}>
+            {turnText}
+            {secondsLeft !== null && (
+              <span className={`ml-2 tabular-nums ${secondsLeft <= 5 ? "font-bold text-red-400" : "text-stone-400"}`} aria-label={`${secondsLeft} seconds left`}>
+                {secondsLeft}s
+              </span>
+            )}
+          </p>
+          <div className="relative flex shrink-0 gap-1">
+            {reactionsOpen && (
+              <div
+                className="absolute bottom-11 right-0 z-30 grid w-64 grid-cols-3 gap-1.5 rounded-2xl border border-white/10 bg-stone-900/95 p-2 shadow-2xl backdrop-blur"
+                role="menu"
+                aria-label="Reactions"
+              >
+                {REACTIONS.map((r) => (
+                  <button
+                    key={r}
+                    role="menuitem"
+                    onClick={() => {
+                      setReactionsOpen(false);
+                      sendReaction({ roomId: room.id, sessionId, reaction: r }).catch((e) => showToast(errorMessage(e)));
+                    }}
+                    className={`min-h-10 rounded-xl bg-white/10 px-1 active:bg-white/25 ${r.length <= 2 ? "text-2xl" : "text-xs font-semibold"}`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setReactionsOpen((v) => !v)}
+              className={`size-9 rounded-full text-sm ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`}
+              aria-label="Send a reaction"
+              aria-expanded={reactionsOpen}
+            >
+              💬
+            </button>
             <button
               onClick={() => {
                 unlockAudio();
@@ -580,7 +652,10 @@ function OpponentChip({ seat, active, partner, showTeam }: { seat: Seat; active:
     >
       <div className="flex items-center gap-1.5">
         <span className={`size-2 shrink-0 rounded-full ${seat.isConnected ? "bg-emerald-400" : "bg-stone-500"}`} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{seat.name}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {seat.avatar && <span aria-hidden>{seat.avatar} </span>}
+          {seat.name}
+        </span>
       </div>
       <div className="flex items-center gap-1.5" aria-hidden>
         <span
@@ -654,13 +729,23 @@ function RoundOverSheet({
 
   return (
     <div className="absolute inset-0 z-20 flex items-end bg-black/50 backdrop-blur-[2px] sm:items-center sm:justify-center">
-      <div className="w-full rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
+      <div className="mx-auto max-h-full w-full max-w-lg overflow-y-auto rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         <h2 className="text-center text-2xl font-bold">{headline}</h2>
         <p className="mt-1 text-center text-sm text-stone-400">
           {room.matchOver ? `First to ${room.targetScore} points. ` : ""}
           {reason}
         </p>
+        {room.lastRound && room.lastRound.points > 0 && (
+          <p className="mt-2 text-center text-lg font-bold text-brass-light">
+            +{room.lastRound.points} points
+            {room.lastRound.bonus > 0 && (
+              <span className="block text-xs font-semibold text-emerald-300">
+                {room.lastRound.bonusKind === "capicua" ? "¡Capicúa! " : ""}includes a +{room.lastRound.bonus} bonus
+              </span>
+            )}
+          </p>
+        )}
 
         {isTeams && (
           <div className="mt-4 grid grid-cols-2 gap-2 text-center">
@@ -677,6 +762,7 @@ function RoundOverSheet({
           {seats.map((s) => (
             <li key={s.seatIndex} className="flex items-center gap-3 px-3 py-2.5 text-sm">
               <span className="min-w-0 flex-1 truncate">
+                {s.avatar && <span aria-hidden>{s.avatar} </span>}
                 {s.name}
                 {s.isMe && <span className="text-stone-500"> (you)</span>}
                 {s.seatIndex === room.winnerSeat && <span className="ml-1">🏆</span>}
@@ -687,32 +773,92 @@ function RoundOverSheet({
           ))}
         </ul>
 
-        <div className="mt-4">
-          <TargetScoreToggle
-            roomId={room.id}
-            sessionId={sessionId}
-            value={room.targetScore}
-            editable={!!me?.isHost}
-            onError={onError}
-          />
-        </div>
+        {me?.isHost && (
+          <details className="mt-3 rounded-xl bg-white/5 px-3 py-2">
+            <summary className="cursor-pointer text-sm text-stone-300">House rules for the next round</summary>
+            <div className="mt-3 space-y-3 pb-1">
+              <TargetScoreToggle roomId={room.id} sessionId={sessionId} value={room.targetScore} editable onError={onError} />
+              <RoomOptions state={state} sessionId={sessionId} onError={onError} />
+            </div>
+          </details>
+        )}
 
-        {me?.isHost ? (
+        {me?.canStart ? (
           <button
             onClick={onNext}
             className="mt-4 h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 active:scale-[0.98]"
           >
-            {room.matchOver ? "New match" : "Next round"}
+            {room.matchOver ? "Rematch" : "Next round"}
           </button>
         ) : (
           <p className="mt-4 text-center text-sm text-stone-400">
-            Waiting for the host to start the {room.matchOver ? "next match" : "next round"}…
+            Waiting for the host to start the {room.matchOver ? "rematch" : "next round"}…
           </p>
         )}
         <Link href="/" className="mt-2 block py-2 text-center text-sm text-stone-500">
           Back to lobby
         </Link>
       </div>
+    </div>
+  );
+}
+
+/** Whole seconds left until `deadline` (a server timestamp), or null without a timer. */
+function useCountdown(deadline: number | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === null) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [deadline]);
+  return deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+const BUBBLE_MS = 3200;
+
+/** Speech bubbles for reactions, shown on the side of the table where each player sits. */
+function ReactionBubbles({ seats, mySeat, muted }: { seats: Seat[]; mySeat: number; muted: boolean }) {
+  const [shown, setShown] = useState<Record<number, { text: string; at: number }>>({});
+  const seen = useRef<Record<number, number> | null>(null);
+  const stamp = seats.map((s) => `${s.seatIndex}:${s.reaction?.at ?? 0}`).join(",");
+  useEffect(() => {
+    // Reactions sent before this screen opened are old news.
+    const first = seen.current === null;
+    const known = seen.current ?? {};
+    for (const s of seats) {
+      const r = s.reaction;
+      if (!r || known[s.seatIndex] === r.at) continue;
+      known[s.seatIndex] = r.at;
+      if (first) continue;
+      setShown((m) => ({ ...m, [s.seatIndex]: r }));
+      if (!muted && !s.isMe) playSfx("turn");
+      setTimeout(() => setShown((m) => (m[s.seatIndex]?.at === r.at ? Object.fromEntries(Object.entries(m).filter(([k]) => Number(k) !== s.seatIndex)) : m)), BUBBLE_MS);
+    }
+    seen.current = known;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stamp]);
+
+  const place = (seat: number) => {
+    const rel = (seat - mySeat + seats.length) % seats.length;
+    if (rel === 0) return "bottom-[30%] left-1/2 -translate-x-1/2";
+    if (seats.length === 2 || rel === 2) return "top-[22%] left-1/2 -translate-x-1/2";
+    return rel === 1 ? "top-[45%] right-[6%]" : "top-[45%] left-[6%]";
+  };
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10" aria-live="polite">
+      {seats.map((s) => {
+        const r = shown[s.seatIndex];
+        if (!r) return null;
+        return (
+          <div key={`${s.seatIndex}:${r.at}`} className={`bubble-in absolute ${place(s.seatIndex)}`}>
+            <div className="flex max-w-56 items-center gap-2 rounded-2xl bg-white px-3 py-2 text-stone-900 shadow-xl">
+              <span className={r.text.length <= 2 ? "text-3xl leading-none" : "text-base font-bold"}>{r.text}</span>
+              <span className="text-[11px] text-stone-500">{s.isMe ? "You" : s.name}</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
