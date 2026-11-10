@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { translateError, useLangStore } from "@/lib/i18n";
 
 type Toast = { id: number; message: string };
 
@@ -26,5 +27,5 @@ export const useGameStore = create<GameUiState>((set) => ({
 export function errorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const m = raw.match(/Uncaught Error:\s*(.+?)(?:\n|\s+at\s|$)/);
-  return (m?.[1] ?? raw).trim();
+  return translateError(useLangStore.getState().lang, (m?.[1] ?? raw).trim());
 }

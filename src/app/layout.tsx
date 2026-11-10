@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ConvexClientProvider } from "./ConvexClientProvider";
+import { LangInit } from "@/components/ui/LangToggle";
 
 export const metadata: Metadata = {
   title: "Dominoes 3D",
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="antialiased">
+        <LangInit />
         <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>

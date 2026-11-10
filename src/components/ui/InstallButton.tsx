@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -9,6 +10,7 @@ export function InstallButton() {
   const [event, setEvent] = useState<InstallEvent | null>(null);
   const [iosHint, setIosHint] = useState(false);
   const [open, setOpen] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     const standalone =
@@ -40,11 +42,11 @@ export function InstallButton() {
         }}
         className="h-11 rounded-full border border-white/15 bg-white/10 px-5 text-sm font-medium text-stone-200 active:bg-white/20"
       >
-        Install the app
+        {t("Install the app")}
       </button>
       {open && !event && (
         <p className="mx-auto mt-2 max-w-xs text-stone-400">
-          In Safari, tap the Share button, then “Add to Home Screen”. The game then opens full screen like an app.
+          {t("In Safari, tap the Share button, then “Add to Home Screen”. The game then opens full screen like an app.")}
         </p>
       )}
     </div>

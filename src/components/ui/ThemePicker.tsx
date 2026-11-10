@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { SCENES } from "@/lib/scenes";
@@ -42,15 +43,16 @@ function usePreviews(open: boolean) {
 export function ThemeButton({ className = "" }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const themeId = useThemeStore((s) => s.themeId);
+  const t = useT();
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         className={`flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 text-xs font-medium active:bg-black/60 ${className}`}
-        aria-label="Change table and background"
+        aria-label={t("Change table and background")}
       >
         <span className="size-3 rounded-full ring-1 ring-white/40" style={{ background: getTheme(themeId).rim }} />
-        <span className="hidden min-[400px]:inline">Table</span>
+        <span className="hidden min-[400px]:inline">{t("Table")}</span>
       </button>
       {/* Inside the game screen when there is one, so the sheet turns with it on phones. */}
       {open && createPortal(<ThemeSheet onClose={() => setOpen(false)} />, document.getElementById("game-root") ?? document.body)}
@@ -61,6 +63,7 @@ export function ThemeButton({ className = "" }: { className?: string }) {
 function ThemeSheet({ onClose }: { onClose: () => void }) {
   const { themeId, setTheme, sceneId, setScene } = useThemeStore();
   const previews = usePreviews(true);
+  const t = useT();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -72,20 +75,20 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 sm:items-center sm:justify-center" onClick={onClose}>
       <div
         role="dialog"
-        aria-label="Table and background"
+        aria-label={t("Table and background")}
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85%] w-full overflow-y-auto rounded-t-3xl bg-stone-900 p-4 pb-safe shadow-2xl sm:max-w-lg sm:rounded-3xl"
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Table and background</h2>
+          <h2 className="text-lg font-semibold">{t("Table and background")}</h2>
           <button onClick={onClose} className="rounded-full px-3 py-1.5 text-sm text-stone-300 active:bg-white/10">
-            Done
+            {t("Done")}
           </button>
         </div>
-        <p className="mb-4 text-xs text-stone-400">Only you see your table and background.</p>
+        <p className="mb-4 text-xs text-stone-400">{t("Only you see your table and background.")}</p>
         <section className="mb-5">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">Background</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">{t("Background")}</h3>
           <div className="grid grid-cols-3 gap-3">
             {SCENES.map((sc) => {
               const active = sc.id === sceneId;
@@ -102,7 +105,7 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
                       <img src={previews[`scene:${sc.id}`]} alt="" className="size-full object-cover" />
                     )}
                   </span>
-                  <span className={`text-center text-[11px] leading-tight ${active ? "text-white" : "text-stone-400"}`}>{sc.name}</span>
+                  <span className={`text-center text-[11px] leading-tight ${active ? "text-white" : "text-stone-400"}`}>{t(sc.name)}</span>
                 </button>
               );
             })}
@@ -111,15 +114,15 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
         {GROUPS.map((g) => (
           <section key={g} className="mb-5">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">
-              {g === "Baseball" ? "Baseball teams" : g}
+              {t(g === "Baseball" ? "Baseball teams" : g)}
             </h3>
             <div className="grid grid-cols-4 gap-3">
-              {THEMES.filter((t) => t.group === g).map((t) => {
-                const active = t.id === themeId;
+              {THEMES.filter((x) => x.group === g).map((th) => {
+                const active = th.id === themeId;
                 return (
                   <button
-                    key={t.id}
-                    onClick={() => setTheme(t.id)}
+                    key={th.id}
+                    onClick={() => setTheme(th.id)}
                     aria-pressed={active}
                     className="flex flex-col items-center gap-1.5"
                   >
@@ -127,15 +130,15 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
                       className={`block aspect-square w-full overflow-hidden rounded-full ring-offset-2 ring-offset-stone-900 ${
                         active ? "ring-2 ring-brass-light" : "ring-1 ring-white/15"
                       }`}
-                      style={{ background: t.rim, boxShadow: `inset 0 0 0 4px ${t.rim}` }}
+                      style={{ background: th.rim, boxShadow: `inset 0 0 0 4px ${th.rim}` }}
                     >
-                      {previews[t.id] && (
+                      {previews[th.id] && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={previews[t.id]} alt="" className="size-full rounded-full p-[4px]" />
+                        <img src={previews[th.id]} alt="" className="size-full rounded-full p-[4px]" />
                       )}
                     </span>
                     <span className={`text-center text-[11px] leading-tight ${active ? "text-white" : "text-stone-400"}`}>
-                      {t.name}
+                      {t(th.name)}
                     </span>
                   </button>
                 );

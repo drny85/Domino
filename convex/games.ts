@@ -519,9 +519,14 @@ export const startGame = mutation({
       await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
     }
 
+    // The winner of the last round opens the next one. A new match, or a round
+    // nobody won (a tied block), is opened by whoever holds the highest double.
+    const lastWinner = newMatch ? -1 : players.findIndex((p) => p.sessionId === room.winnerSessionId);
+    const starter = lastWinner >= 0 ? lastWinner : findStartingPlayer(hands);
+
     await ctx.db.patch(roomId, {
       status: "playing",
-      currentTurnSeat: findStartingPlayer(hands),
+      currentTurnSeat: starter,
       openEnds: { left: null, right: null },
       board: [],
       boneyard,

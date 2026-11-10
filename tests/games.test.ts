@@ -318,3 +318,35 @@ describe("house rules and table extras", () => {
     vi.useRealTimers();
   });
 });
+
+describe("who opens", () => {
+  it("the round winner opens the next round, and the highest double opens a new match", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2, "block");
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const holdsHighestDouble = async () => {
+      const hands = await t.run(async (ctx) => (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex).map((p) => p.hand));
+      const best = (h: typeof hands[number]) => Math.max(-1, ...h.filter((x) => x.a === x.b).map((x) => x.a));
+      return best(hands[0]) === best(hands[1]) ? null : best(hands[0]) > best(hands[1]) ? 0 : 1;
+    };
+    const first = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    const expected = await holdsHighestDouble();
+    if (expected !== null) expect(first.room.currentTurnSeat).toBe(expected);
+
+    for (let round = 0; round < 12; round++) {
+      await t.finishAllScheduledFunctions(vi.runAllTimers); // the server plays the round out
+      const end = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      expect(end.room.status).toBe("finished");
+      await t.mutation(api.games.startGame, { roomId, sessionId: S(1) });
+      const next = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      if (end.room.matchOver) {
+        expect(next.room.round).toBe(1);
+        const dbl = await holdsHighestDouble();
+        if (dbl !== null) expect(next.room.currentTurnSeat).toBe(dbl);
+      } else if (end.room.winnerSeat !== null) {
+        expect(next.room.currentTurnSeat).toBe(end.room.winnerSeat);
+      }
+    }
+    vi.useRealTimers();
+  });
+});

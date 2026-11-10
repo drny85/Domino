@@ -1,5 +1,7 @@
 "use client";
 
+import { LangToggle } from "@/components/ui/LangToggle";
+import { useT } from "@/lib/i18n";
 import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -23,6 +25,7 @@ const MATCHES: { id: MatchType; title: string; detail: string }[] = [
 
 export default function Home() {
   const router = useRouter();
+  const t = useT();
   const { session, setName, newTabIdentity } = useSession();
   const createRoom = useMutation(api.games.createRoom);
   const joinRoom = useMutation(api.games.joinRoom);
@@ -77,7 +80,8 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-4 pb-safe pt-safe">
-      <div className="flex justify-end pt-2">
+      <div className="flex items-center justify-end gap-2 pt-2">
+        <LangToggle />
         <ThemeButton />
       </div>
       <header className="flex flex-col items-center gap-3">
@@ -86,13 +90,13 @@ export default function Home() {
           <DominoFace a={3} b={5} className="w-12" />
           <DominoFace a={1} b={4} className="w-10 rotate-12" />
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Dominoes</h1>
-        <p className="text-sm text-stone-300">Double-Six · real-time · no sign-up</p>
+        <h1 className="text-3xl font-bold tracking-tight">{t("Dominoes")}</h1>
+        <p className="text-sm text-stone-300">{t("Double-Six · real-time · no sign-up")}</p>
       </header>
 
       <section className="space-y-2">
         <label htmlFor="name" className="text-xs font-semibold uppercase tracking-wider text-stone-400">
-          Your name
+          {t("Your name")}
         </label>
         <input
           id="name"
@@ -100,22 +104,22 @@ export default function Home() {
           onChange={(e) => setLocalName(e.target.value)}
           maxLength={24}
           autoComplete="nickname"
-          placeholder="e.g. Robert"
+          placeholder={t("e.g. Robert")}
           className="h-12 w-full rounded-xl border border-white/10 bg-black/30 px-4 text-base outline-none placeholder:text-stone-500 focus:border-brass"
         />
         {mounted && <AvatarPicker value={avatar} onChange={setAvatar} />}
         {mounted && stats.roundsWon + stats.roundsLost > 0 && (
           <p className="text-xs text-stone-400">
-            Your record: <b className="text-stone-200">{stats.matchesWon}</b> matches won, {stats.matchesLost} lost · {stats.roundsWon} rounds won
-            {stats.capicuas > 0 && <> · {stats.capicuas} capicúas</>}
-            {stats.bestStreak > 1 && <> · best streak {stats.bestStreak}</>}
+            {t("Your record: {won} matches won, {lost} lost · {rounds} rounds won", { won: stats.matchesWon, lost: stats.matchesLost, rounds: stats.roundsWon })}
+            {stats.capicuas > 0 && <> · {t("{n} capicúas", { n: stats.capicuas })}</>}
+            {stats.bestStreak > 1 && <> · {t("best streak {n}", { n: stats.bestStreak })}</>}
           </p>
         )}
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">New game</h2>
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Match type">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">{t("New game")}</h2>
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t("Match type")}>
           {MATCHES.map((m) => (
             <button
               key={m.id}
@@ -128,13 +132,13 @@ export default function Home() {
                   : "border-white/10 bg-black/20 text-stone-300 active:bg-black/40"
               }`}
             >
-              <span className="text-base font-semibold">{m.title}</span>
-              <span className="text-[11px] leading-tight text-stone-400">{m.detail}</span>
+              <span className="text-base font-semibold">{t(m.title)}</span>
+              <span className="text-[11px] leading-tight text-stone-400">{t(m.detail)}</span>
             </button>
           ))}
         </div>
 
-        <div className="flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="Rules">
+        <div className="flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Rules")}>
           {(["draw", "block"] as const).map((m) => (
             <button
               key={m}
@@ -145,13 +149,13 @@ export default function Home() {
                 mode === m ? "bg-white/15 text-white" : "text-stone-400"
               }`}
             >
-              {m === "draw" ? "Draw game" : "Block game"}
+              {m === "draw" ? t("Draw game") : t("Block game")}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-stone-300">Points to win</span>
-          <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="Points to win">
+          <span className="text-sm text-stone-300">{t("Points to win")}</span>
+          <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Points to win")}>
             {([100, 200] as const).map((pts) => (
               <button
                 key={pts}
@@ -170,8 +174,8 @@ export default function Home() {
 
         {matchType === "cpu" && (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-stone-300">CPU level</span>
-            <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="CPU level">
+            <span className="text-sm text-stone-300">{t("CPU level")}</span>
+            <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("CPU level")}>
               {(["easy", "normal", "hard"] as const).map((lv) => (
                 <button
                   key={lv}
@@ -182,7 +186,7 @@ export default function Home() {
                     cpuLevel === lv ? "bg-white/15 text-white" : "text-stone-400"
                   }`}
                 >
-                  {lv}
+                  {t(lv === "easy" ? "Easy" : lv === "normal" ? "Normal" : "Hard")}
                 </button>
               ))}
             </div>
@@ -191,8 +195,8 @@ export default function Home() {
 
         <p className="text-xs text-stone-400">
           {mode === "draw"
-            ? "Can't play? Draw from the boneyard until you can."
-            : "Can't play? Pass. No drawing."}
+            ? t("Can't play? Draw from the boneyard until you can.")
+            : t("Can't play? Pass. No drawing.")}
         </p>
 
         <button
@@ -200,12 +204,12 @@ export default function Home() {
           disabled={!ready || busy !== null}
           className="h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 shadow-lg shadow-black/30 transition active:scale-[0.98] disabled:opacity-40"
         >
-          {busy === "create" ? "Creating…" : matchType === "cpu" ? "Play vs CPU" : "Create room"}
+          {busy === "create" ? t("Creating…") : matchType === "cpu" ? t("Play vs CPU") : t("Create room")}
         </button>
       </section>
 
       <form onSubmit={onJoin} className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">Join with a code</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">{t("Join with a code")}</h2>
         <div className="flex gap-2">
           <input
             value={code}
@@ -215,7 +219,7 @@ export default function Home() {
             autoCapitalize="characters"
             autoCorrect="off"
             spellCheck={false}
-            aria-label="Room code"
+            aria-label={t("Room code")}
             className="h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 text-center font-mono text-lg tracking-[0.3em] outline-none placeholder:text-stone-600 focus:border-brass"
           />
           <button
@@ -223,7 +227,7 @@ export default function Home() {
             disabled={!ready || code.length !== 6 || busy !== null}
             className="h-12 rounded-xl border border-white/15 bg-white/10 px-5 font-semibold transition active:scale-[0.98] disabled:opacity-40"
           >
-            {busy === "join" ? "…" : "Join"}
+            {busy === "join" ? "…" : t("Join")}
           </button>
         </div>
       </form>
@@ -236,9 +240,9 @@ export default function Home() {
 
       <footer className="mt-auto pb-2 text-center text-xs text-stone-500">
         <InstallButton />
-        {!ready && session && <p className="mb-2">Enter a name to start.</p>}
+        {!ready && session && <p className="mb-2">{t("Enter a name to start.")}</p>}
         <button onClick={newTabIdentity} className="underline decoration-dotted underline-offset-4">
-          {session?.isTabIdentity ? "Using a separate identity in this tab" : "Testing? Use a separate player in this tab"}
+          {session?.isTabIdentity ? t("Using a separate identity in this tab") : t("Testing? Use a separate player in this tab")}
         </button>
       </footer>
     </main>

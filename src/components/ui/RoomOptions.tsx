@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { GameState } from "@/lib/types";
@@ -49,6 +50,7 @@ function Segmented<T extends string | number>({
 /** House rules: turn timer, bonuses and CPU level. The host edits; everyone else just sees them. */
 export function RoomOptions({ state, sessionId, onError }: { state: GameState; sessionId: string; onError?: (msg: string) => void }) {
   const setOptions = useMutation(api.games.setRoomOptions);
+  const t = useT();
   const { room, me } = state;
   const editable = !!me?.isHost && room.status !== "playing";
   const save = (patch: { turnSeconds?: 0 | 20 | 30; bonuses?: boolean; cpuLevel?: "easy" | "normal" | "hard" }) =>
@@ -56,37 +58,37 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
   return (
     <div className="space-y-3">
       <Segmented
-        label="Turn timer"
-        hint="Time runs out: the game plays for you"
+        label={t("Turn timer")}
+        hint={t("Time runs out: the game plays for you")}
         value={room.turnSeconds as 0 | 20 | 30}
         editable={editable}
         options={[
-          { value: 0, text: "Off" },
+          { value: 0, text: t("Off") },
           { value: 20, text: "20s" },
           { value: 30, text: "30s" },
         ]}
         onPick={(turnSeconds) => save({ turnSeconds })}
       />
       <Segmented
-        label="Bonuses"
-        hint={room.matchType === "2v2" ? "+25 capicúa, +25 when all three pass" : "+25 for a capicúa"}
+        label={t("Bonuses")}
+        hint={room.matchType === "2v2" ? t("+25 capicúa, +25 when all three pass") : t("+25 for a capicúa")}
         value={room.bonuses ? "on" : "off"}
         editable={editable}
         options={[
-          { value: "off", text: "Off" },
-          { value: "on", text: "On" },
+          { value: "off", text: t("Off") },
+          { value: "on", text: t("On") },
         ]}
         onPick={(v) => save({ bonuses: v === "on" })}
       />
       {room.matchType === "cpu" && (
         <Segmented
-          label="CPU level"
+          label={t("CPU level")}
           value={room.cpuLevel}
           editable={editable}
           options={[
-            { value: "easy", text: "Easy" },
-            { value: "normal", text: "Normal" },
-            { value: "hard", text: "Hard" },
+            { value: "easy", text: t("Easy") },
+            { value: "normal", text: t("Normal") },
+            { value: "hard", text: t("Hard") },
           ]}
           onPick={(cpuLevel) => save({ cpuLevel })}
         />

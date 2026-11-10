@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -22,6 +23,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 export default function RoomPage() {
+  const t = useT();
   const params = useParams<{ code: string }>();
   const code = (params.code ?? "").toUpperCase();
   const { session, setName } = useSession();
@@ -69,7 +71,7 @@ export default function RoomPage() {
   if (roomInfo === undefined || !session || (roomInfo && state === undefined)) {
     return (
       <Centered>
-        <div className="size-8 animate-spin rounded-full border-2 border-white/20 border-t-brass" aria-label="Loading" />
+        <div className="size-8 animate-spin rounded-full border-2 border-white/20 border-t-brass" aria-label={t("Loading")} />
       </Centered>
     );
   }
@@ -77,9 +79,9 @@ export default function RoomPage() {
   if (roomInfo === null || state === null) {
     return (
       <Centered>
-        <h1 className="text-xl font-semibold">Room {code} not found</h1>
+        <h1 className="text-xl font-semibold">{t("Room {code} not found", { code })}</h1>
         <Link href="/" className="rounded-xl bg-white/10 px-5 py-3 font-medium">
-          Back to lobby
+          {t("Back to lobby")}
         </Link>
       </Centered>
     );
@@ -89,10 +91,10 @@ export default function RoomPage() {
     const open = roomInfo.status === "waiting" && roomInfo.playerCount < roomInfo.seats && roomInfo.matchType !== "cpu";
     return (
       <Centered>
-        <h1 className="text-2xl font-bold">Join room {code}</h1>
+        <h1 className="text-2xl font-bold">{t("Join room {code}", { code })}</h1>
         <p className="text-sm text-stone-300">
-          {roomInfo.matchType === "2v2" ? "2 vs 2 teams" : roomInfo.matchType === "cpu" ? "vs CPU" : "1 vs 1"} ·{" "}
-          {roomInfo.playerCount}/{roomInfo.seats} seated
+          {t(roomInfo.matchType === "2v2" ? "2 vs 2 teams" : roomInfo.matchType === "cpu" ? "vs CPU" : "1 vs 1")} ·{" "}
+          {t("{n}/{seats} seated", { n: roomInfo.playerCount, seats: roomInfo.seats })}
         </p>
         {open ? (
           <form
@@ -116,25 +118,25 @@ export default function RoomPage() {
               value={name}
               onChange={(e) => setLocalName(e.target.value)}
               maxLength={24}
-              placeholder="Your name"
-              aria-label="Your name"
+              placeholder={t("Your name")}
+              aria-label={t("Your name")}
               className="h-12 w-full rounded-xl border border-white/10 bg-black/30 px-4 text-base outline-none focus:border-brass"
             />
             <button
               disabled={!name.trim() || joining}
               className="h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 disabled:opacity-40"
             >
-              {joining ? "Joining…" : "Take a seat"}
+              {joining ? t("Joining…") : t("Take a seat")}
             </button>
             {joinError && <p className="text-sm text-red-300">{joinError}</p>}
           </form>
         ) : (
           <p className="text-stone-300">
-            {roomInfo.status === "waiting" ? "This room is full." : "This game has already started."}
+            {roomInfo.status === "waiting" ? t("This room is full.") : t("This game has already started.")}
           </p>
         )}
         <Link href="/" className="text-sm text-stone-400 underline underline-offset-4">
-          Back to lobby
+          {t("Back to lobby")}
         </Link>
       </Centered>
     );

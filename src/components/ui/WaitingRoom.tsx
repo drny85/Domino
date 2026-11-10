@@ -1,5 +1,7 @@
 "use client";
 
+import { LangToggle } from "./LangToggle";
+import { useT } from "@/lib/i18n";
 import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -15,6 +17,7 @@ type SeatPerson = { name: string; avatar: string | null; isMe: boolean; isHost: 
 
 export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId: string }) {
   const router = useRouter();
+  const t = useT();
   const startGame = useMutation(api.games.startGame);
   const leaveRoom = useMutation(api.games.leaveRoom);
   const switchSeat = useMutation(api.games.switchSeat);
@@ -38,7 +41,7 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
     const url = `${window.location.origin}/room/${room.code}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: "Join my dominoes game", text: `Room code ${room.code}`, url });
+        await navigator.share({ title: t("Join my dominoes game"), text: t("Room code {code}", { code: room.code }), url });
         return;
       }
     } catch {
@@ -49,7 +52,7 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      setError("Couldn't copy. The code is " + room.code);
+      setError(t("Couldn't copy. The code is {code}", { code: room.code }));
     }
   }
 
@@ -78,10 +81,10 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
         </span>
         <span className="min-w-0 flex-1 truncate font-medium">
           {seat.name}
-          {seat.isMe && <span className="text-stone-400"> (you)</span>}
+          {seat.isMe && <span className="text-stone-400"> {t("(you)")}</span>}
         </span>
-        {seat.isHost && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">Host</span>}
-        {seat.isBot && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">Bot</span>}
+        {seat.isHost && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">{t("Host")}</span>}
+        {seat.isBot && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">{t("Bot")}</span>}
       </div>
     ) : (
       <button
@@ -89,23 +92,24 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
         onClick={() => run(() => switchSeat({ roomId: room.id, sessionId, seatIndex: index }))}
         className="flex h-14 w-full items-center justify-center rounded-xl border border-dashed border-white/15 text-sm text-stone-400 enabled:active:bg-white/5"
       >
-        {room.matchType === "2v2" ? "Empty seat · tap to sit here" : "Waiting for a player…"}
+        {room.matchType === "2v2" ? t("Empty seat · tap to sit here") : t("Waiting for a player…")}
       </button>
     );
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-4 pb-safe pt-safe">
-      <div className="-mb-4 flex justify-end pt-2">
+      <div className="-mb-4 flex items-center justify-end gap-2 pt-2">
+        <LangToggle />
         <ThemeButton />
       </div>
       <header className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">Room code</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">{t("Room code")}</p>
         <p className="mt-1 font-mono text-4xl font-bold tracking-[0.25em] text-brass-light">{room.code}</p>
         <p className="mt-2 text-sm text-stone-300">
-          {room.matchType === "2v2" ? "2 vs 2 teams" : "1 vs 1"} · {room.mode === "draw" ? "Draw game" : "Block game"}
+          {t(room.matchType === "2v2" ? "2 vs 2 teams" : room.matchType === "cpu" ? "vs CPU" : "1 vs 1")} · {room.mode === "draw" ? t("Draw game") : t("Block game")}
         </p>
         <button onClick={share} className="mt-4 h-11 rounded-full bg-white/10 px-6 text-sm font-medium active:bg-white/20">
-          {copied ? "Link copied" : "Share invite link"}
+          {copied ? t("Link copied") : t("Share invite link")}
         </button>
         {room.matchType !== "cpu" && (
           <button
@@ -113,13 +117,13 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
             aria-expanded={showQr}
             className="ml-2 mt-4 h-11 rounded-full bg-white/10 px-5 text-sm font-medium active:bg-white/20"
           >
-            {showQr ? "Hide QR" : "Show QR code"}
+            {showQr ? t("Hide QR") : t("Show QR code")}
           </button>
         )}
         {showQr && (
           <div className="mt-4 flex flex-col items-center gap-2">
             <QrCode value={`${window.location.origin}/room/${room.code}`} className="size-44 rounded-xl" />
-            <p className="text-xs text-stone-400">Scan with a phone camera to join</p>
+            <p className="text-xs text-stone-400">{t("Scan with a phone camera to join")}</p>
           </div>
         )}
       </header>
@@ -129,19 +133,19 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
           {[0, 1].map((team) => (
             <section key={team} className="space-y-2">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">
-                Team {team === 0 ? "A" : "B"}
+                {t("Team {x}", { x: team === 0 ? "A" : "B" })}
               </h2>
               {[team, team + 2].map((i) => (
                 <SeatCard key={i} seat={seats[i]} index={i} />
               ))}
             </section>
           ))}
-          <p className="text-xs text-stone-400">Partners sit across from each other and share a score.</p>
+          <p className="text-xs text-stone-400">{t("Partners sit across from each other and share a score.")}</p>
         </div>
       ) : (
         <section className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400">
-            Players {filled}/{room.seats}
+            {t("Players {n}/{seats}", { n: filled, seats: room.seats })}
           </h2>
           {seats.map((s, i) => (
             <SeatCard key={i} seat={s} index={i} />
@@ -171,10 +175,10 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
             onClick={() => run(() => startGame({ roomId: room.id, sessionId }))}
             className="h-14 w-full rounded-xl bg-brass text-lg font-semibold text-stone-900 transition active:scale-[0.98] disabled:opacity-40"
           >
-            {full ? "Start game" : `Waiting for ${room.seats - filled} more…`}
+            {full ? t("Start game") : t("Waiting for {n} more…", { n: room.seats - filled })}
           </button>
         ) : (
-          <p className="text-center text-sm text-stone-300">Waiting for the host to start…</p>
+          <p className="text-center text-sm text-stone-300">{t("Waiting for the host to start…")}</p>
         )}
         <button
           disabled={busy}
@@ -186,7 +190,7 @@ export function WaitingRoom({ state, sessionId }: { state: GameState; sessionId:
           }
           className="h-12 w-full rounded-xl text-sm text-stone-400 active:bg-white/5"
         >
-          Leave room
+          {t("Leave room")}
         </button>
       </div>
     </main>
