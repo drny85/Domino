@@ -31,6 +31,9 @@ export const RACK_LENGTH = SURFACE_SIZE * 0.62;
 /** Where a rack sits on its rail, in the rail's local frame (see OpponentRack). */
 export const RACK_Z = HALF + RAIL_WIDTH / 2 + 0.1;
 export const RACK_Y = RAIL_TOP + 0.03;
+/** Centre of a corner cup holder: distance from the table centre on x and z, and the height of its well. */
+export const CUP_OFFSET = HALF + RAIL_WIDTH / 2;
+export const CUP_Y = RAIL_TOP + 0.16;
 /** Outer half-size of the whole table, for camera framing. */
 export const TABLE_HALF = HALF + RAIL_WIDTH + 0.25;
 

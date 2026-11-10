@@ -12,7 +12,8 @@ import { CameraRig, type Bounds } from "./CameraRig";
 import { BoneyardPile } from "./BoneyardPile";
 import { DominoTile } from "./DominoTile";
 import { HandRack, type HandTileSpec } from "./HandRack";
-import { OpponentRack, type RackSpec } from "./OpponentRack";
+import { Drink } from "./Drink";
+import { OpponentRack, type RackSide, type RackSpec } from "./OpponentRack";
 import { Table } from "./Table";
 
 export type GhostSpec = { side: Side; tile: Tile };
@@ -26,6 +27,8 @@ type SceneProps = {
   zoom: number;
   /** Opponents' hands, shown as face-down tiles on their racks. */
   racks: RackSpec[];
+  /** Sides of the table whose player asked for a drink. */
+  drinks?: RackSide[];
   /** Lights the strip on the player's own (south) rail. */
   myTurn: boolean;
   /** The player's own tiles, standing in their rack. */
@@ -162,6 +165,7 @@ export default function GameScene(props: SceneProps) {
         <OpponentRack key={r.side} {...r} />
       ))}
       <HandRack tiles={props.hand} onTap={props.onHandTap} />
+      {props.drinks?.map((side) => <Drink key={side} side={side} />)}
       <BoneyardPile count={props.boneyardCount} />
       <Board {...props} />
       <FirstFrame onReady={props.onReady} />

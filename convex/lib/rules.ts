@@ -295,7 +295,11 @@ export function isCapicua(tile: Tile, ends: OpenEnds): boolean {
 }
 
 /** One-tap table talk. Anything else is rejected by the server. */
-export const REACTIONS = ["¡Capicúa!", "¡Tranque!", "Paso", "¡Ahí va!", "¡Dale!", "Buena jugada", "👏", "😂", "😎", "🔥", "😱", "🤔"] as const;
+export const REACTIONS = ["¡Capicúa!", "¡Tranque!", "Paso", "¡Ahí va!", "¡Dale!", "Buena jugada", "Bring me a drink!", "👏", "😂", "😎", "🔥", "😱"] as const;
+/** Hurries the player on the move, so it makes no sense on your own turn. */
+export const HURRY_REACTION = "¡Dale!";
+/** Puts a drink in the cup holder on the sender's right. */
+export const DRINK_REACTION = "Bring me a drink!";
 
 /** Seat avatars a player can pick. */
 export const AVATARS = ["🙂", "😎", "🤠", "🦁", "🐯", "🦅", "🐓", "🌴", "⚾", "🎩", "👑", "🔥", "🇩🇴", "🇵🇷", "🇨🇺", "🇲🇽", "🇻🇪", "🇨🇴", "🇺🇸", "🇪🇸"] as const;

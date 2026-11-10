@@ -6,6 +6,8 @@ import { cpuLevelValidator, matchTypeValidator, modeValidator, targetScoreValida
 import {
   AVATARS,
   BONUS_POINTS,
+  DRINK_REACTION,
+  HURRY_REACTION,
   REACTIONS,
   blockedWinner,
   chooseCpuMove,
@@ -463,8 +465,18 @@ export const sendReaction = mutation({
     const me = await getPlayer(ctx, roomId, sessionId);
     if (!me) throw new Error("You are not seated in this room");
     const now = Date.now();
+    if (reaction === HURRY_REACTION) {
+      const room = await getRoomOrThrow(ctx, roomId);
+      if (room.status !== "playing" || room.currentTurnSeat === me.seatIndex) {
+        throw new Error("That one is for when someone else is playing");
+      }
+    }
     if (me.reaction && now - me.reaction.at < REACTION_COOLDOWN_MS) return;
-    await ctx.db.patch(me._id, { reaction: { text: reaction, at: now }, lastSeen: now });
+    await ctx.db.patch(me._id, {
+      reaction: { text: reaction, at: now },
+      lastSeen: now,
+      ...(reaction === DRINK_REACTION ? { drink: true } : {}),
+    });
   },
 });
 
@@ -743,6 +755,7 @@ export const getGameState = query({
             canStart: room.hostSessionId === sessionId || (finished && hostAway),
             avatar: me.avatar ?? null,
             reaction: me.reaction ?? null,
+            drink: !!me.drink,
             isMyTurn,
             playable,
             canDrawOrPass: isMyTurn && room.board.length > 0 && playable.length === 0,
@@ -765,6 +778,7 @@ export const getGameState = query({
           isBot: !!p.isBot,
           avatar: p.avatar ?? null,
           reaction: p.reaction ?? null,
+          drink: !!p.drink,
           finalPips: finished ? pipTotal(p.hand) : null,
         })),
     };

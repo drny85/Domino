@@ -160,6 +160,7 @@ export const ES: Record<string, string> = {
   Reactions: "Reacciones",
   // Reaction phrases are stored as sent; only these read differently in Spanish.
   "¡Dale!": "¡Juega palomo!",
+  "Bring me a drink!": "¡Tráeme un trago!",
   "Send a reaction": "Enviar una reacción",
   "Turn sound on": "Activar sonido",
   "Turn sound off": "Quitar sonido",
@@ -229,6 +230,7 @@ export const ES: Record<string, string> = {
   "Only the host can change the rules": "Solo el anfitrión puede cambiar las reglas",
   "Change the rules between rounds": "Cambia las reglas entre manos",
   "Unknown reaction": "Reacción desconocida",
+  "That one is for when someone else is playing": "Eso es para cuando le toca a otro",
   "The game is already in progress": "La partida ya está en curso",
   "Only the host can start the game": "Solo el anfitrión puede empezar la partida",
   "This match needs {n} players ({m} seated)": "Esta partida necesita {n} jugadores (hay {m} sentados)",

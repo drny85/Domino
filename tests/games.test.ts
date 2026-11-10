@@ -61,7 +61,7 @@ describe("information hiding", () => {
     expect(s!.room.boneyardCount).toBe(0);
     for (const o of s!.opponents) {
       expect(Object.keys(o).sort()).toEqual(
-        ["avatar", "finalPips", "id", "isBot", "isConnected", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
+        ["avatar", "drink", "finalPips", "id", "isBot", "isConnected", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
       );
       expect(o.tileCount).toBe(7);
     }
@@ -298,6 +298,17 @@ describe("house rules and table extras", () => {
     expect(s.opponents[0].reaction?.text).toBe("¡Capicúa!");
     expect(s.opponents[0].avatar).toBe("🦁");
     expect(s.me!.avatar).toBeNull();
+    // A drink stays at the seat once asked for; hurrying needs a game with someone else on the move.
+    expect(s.opponents[0].drink).toBe(false);
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: S(0), reaction: "¡Dale!" })).rejects.toThrow(/someone else/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: S(0), reaction: "Bring me a drink!" });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const g = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(g.me!.drink).toBe(true);
+    const mover = g.me!.isMyTurn ? S(0) : S(1);
+    const waiter = g.me!.isMyTurn ? S(1) : S(0);
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: mover, reaction: "¡Dale!" })).rejects.toThrow(/someone else/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: waiter, reaction: "¡Dale!" });
   });
 
   it.each([20, 0] as const)("plays for players who run out of time or drop off (timer %i)", async (turnSeconds) => {

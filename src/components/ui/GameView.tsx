@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
-import { REACTIONS, type Side, type Tile } from "../../../convex/lib/rules";
+import { HURRY_REACTION, REACTIONS, type Side, type Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
 import { useT } from "@/lib/i18n";
@@ -42,6 +42,7 @@ type Seat = {
   finalPips: number | null;
   avatar: string | null;
   reaction: { text: string; at: number } | null;
+  drink: boolean;
 };
 
 export function GameView({ state, sessionId }: { state: GameState; sessionId: string }) {
@@ -80,6 +81,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         finalPips: me.finalPips,
         avatar: me.avatar,
         reaction: me.reaction,
+        drink: me.drink,
       });
     }
     return list.sort((a, b) => a.seatIndex - b.seatIndex);
@@ -188,6 +190,13 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     const side = seats.length === 2 ? "north" : rel === 1 ? "east" : rel === 2 ? "north" : "west";
     return { side, count: o.tileCount, active: room.status === "playing" && room.currentTurnSeat === o.seatIndex };
   });
+
+  const sideOf = (seat: number): RackSpec["side"] => {
+    const rel = (seat - mySeat + seats.length) % seats.length;
+    return rel === 0 ? "south" : seats.length === 2 || rel === 2 ? "north" : rel === 1 ? "east" : "west";
+  };
+  const drinkKey = seats.filter((s) => s.drink).map((s) => sideOf(s.seatIndex)).join(",");
+  const drinks = useMemo(() => (drinkKey ? (drinkKey.split(",") as RackSpec["side"][]) : []), [drinkKey]);
 
   // Sounds and the big announcement banner, driven by server events.
   const { muted, toggleMuted } = useSettingsStore();
@@ -403,6 +412,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             onGhost={(side) => selected && play(selected, side)}
             zoom={zoom}
             racks={racks}
+            drinks={drinks}
             myTurn={isMyTurn}
             onReady={onSceneReady}
             hand={handSpecs}
@@ -484,11 +494,13 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
                   <button
                     key={r}
                     role="menuitem"
+                    // Hurrying is only for when someone else is on the move.
+                    disabled={r === HURRY_REACTION && (room.status !== "playing" || isMyTurn)}
                     onClick={() => {
                       setReactionsOpen(false);
                       sendReaction({ roomId: room.id, sessionId, reaction: r }).catch((e) => showToast(errorMessage(e)));
                     }}
-                    className={`min-h-10 rounded-xl bg-white/10 px-1 active:bg-white/25 ${r.length <= 2 ? "text-2xl" : "text-xs font-semibold"}`}
+                    className={`min-h-10 rounded-xl bg-white/10 px-1 active:bg-white/25 disabled:opacity-30 ${r.length <= 2 ? "text-2xl" : "text-xs font-semibold"}`}
                   >
                     {t(r)}
                   </button>

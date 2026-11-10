@@ -76,6 +76,8 @@ export default defineSchema({
     lastSeen: v.optional(v.number()),
     avatar: v.optional(v.string()),
     reaction: v.optional(v.object({ text: v.string(), at: v.number() })),
+    // Asked for a drink: one stands in the cup holder on their right.
+    drink: v.optional(v.boolean()),
   })
     .index("by_room", ["roomId"])
     .index("by_room_session", ["roomId", "sessionId"]),
