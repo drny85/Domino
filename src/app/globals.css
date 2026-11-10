@@ -41,4 +41,4 @@ body {
   from { transform: translate(-50%, -8px); opacity: 0; }
   to { transform: translate(-50%, 0); opacity: 1; }
 }
-.toast-in { animation: toast-in 160ms ease-out; }
+.toast-in { transform: translate(-50%, 0); animation: toast-in 160ms ease-out; }

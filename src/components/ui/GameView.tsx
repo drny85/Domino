@@ -3,7 +3,7 @@
 import { useMutation } from "convex/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Side, Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
@@ -78,6 +78,24 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   const playableMap = useMemo(() => new Map(me?.playable.map((p) => [p.tileId, p.sides as Side[]]) ?? []), [me?.playable]);
   const hand = useMemo(() => [...(me?.hand ?? [])].sort((x, y) => x.a - y.a || x.b - y.b), [me?.hand]);
   const selected = hand.find((t) => t.id === selectedTileId) ?? null;
+  const handSpecs = useMemo(
+    () =>
+      hand.map((t) => {
+        const playable = !!me?.isMyTurn && playableMap.has(t.id);
+        return {
+          id: t.id,
+          a: t.a,
+          b: t.b,
+          playable,
+          selected: t.id === selectedTileId,
+          dim: !!me?.isMyTurn && !playable && room.board.length > 0,
+        };
+      }),
+    [hand, me?.isMyTurn, playableMap, selectedTileId, room.board.length],
+  );
+  // Stable callback for the 3D rack; always acts on the latest hand.
+  const tapRef = useRef<(id: string) => void>(() => {});
+  const onHandTap = useCallback((id: string) => tapRef.current(id), []);
   const selectedSides = selected ? (playableMap.get(selected.id) ?? []) : [];
 
   // Drop a stale selection when the turn or hand changes.
@@ -122,6 +140,14 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     }
     select(selectedTileId === tile.id ? null : tile.id);
   }
+
+  tapRef.current = (id) => {
+    const tile = hand.find((t) => t.id === id);
+    if (tile) {
+      unlockAudio();
+      onTileTap(tile);
+    }
+  };
 
   async function onDrawOrPass() {
     setPending(true);
@@ -276,6 +302,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             zoom={zoom}
             racks={racks}
             myTurn={isMyTurn}
+            hand={handSpecs}
+            onHandTap={onHandTap}
+            boneyardCount={room.mode === "draw" ? room.boneyardCount : 0}
           />
         </div>
 
@@ -305,7 +334,8 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           )}
         </div>
 
-        <div className="absolute bottom-3 right-3 flex flex-col gap-2">
+        {/* Top right, clear of the player's rack at the bottom of the table. */}
+        <div className="absolute right-2 top-12 flex flex-col gap-2">
           <button
             onClick={() => {
               unlockAudio();
@@ -368,37 +398,24 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           </div>
         )}
 
-        {/* Centered when the hand fits; scrolls from the first tile when it doesn't. */}
-        <div className="no-scrollbar overflow-x-auto pb-2 pt-5">
-          <div className="mx-auto flex w-max min-w-full items-end justify-center gap-2 px-3" role="list" aria-label="Your tiles">
-          {hand.map((t) => {
-            const canPlay = playableMap.has(t.id);
-            const dim = me?.isMyTurn && !canPlay && room.board.length > 0;
-            const isSel = t.id === selectedTileId;
-            return (
-              <button
-                key={t.id}
-                role="listitem"
-                onClick={() => onTileTap(t)}
-                aria-label={`Tile ${t.a}-${t.b}${canPlay ? ", playable" : ""}`}
-                className={`shrink-0 rounded-lg transition-transform duration-150 ${isSel ? "-translate-y-3" : canPlay && me?.isMyTurn ? "-translate-y-1" : ""} ${
-                  dim ? "opacity-40" : ""
-                } ${isSel ? "ring-2 ring-brass-light ring-offset-2 ring-offset-black" : ""}`}
-              >
-                <DominoFace a={t.a} b={t.b} className="w-[clamp(2.5rem,11.5vw,3.5rem)]" />
-              </button>
-            );
-          })}
+        {/* The tiles themselves stand in the 3D rack; this list keeps them reachable by keyboard and screen readers. */}
+        <ul className="sr-only" aria-label="Your tiles">
+          {hand.map((t) => (
+            <li key={t.id}>
+              <button onClick={() => onTileTap(t)}>{`Tile ${t.a}-${t.b}${playableMap.has(t.id) ? ", playable" : ""}`}</button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex min-h-3 justify-center px-3 pb-2 pt-2">
           {me?.canDrawOrPass && (
             <button
               disabled={pending}
               onClick={onDrawOrPass}
-              className="turn-pulse ml-2 h-16 shrink-0 self-center rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50"
+              className="turn-pulse h-12 w-full max-w-sm rounded-xl bg-brass px-5 font-semibold text-stone-900 active:scale-95 disabled:opacity-50"
             >
               {me.willDraw ? `Draw (${room.boneyardCount})` : "Pass"}
             </button>
           )}
-          </div>
         </div>
       </footer>
 

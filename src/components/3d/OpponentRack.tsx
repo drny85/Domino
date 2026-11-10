@@ -28,7 +28,7 @@ export function OpponentRack({ side, count, active }: RackSpec) {
       <group position={[0, RACK_Y, RACK_Z]}>
         {tiles.map((x, i) => (
           // Leaning back slightly against the rack's ledge, backs toward the table.
-          <mesh key={i} geometry={tileGeometry} material={tileMaterial} position={[x, 0.98, 0.18]} rotation={[0.2, 0, 0]} />
+          <mesh key={i} geometry={tileGeometry} material={tileMaterial} position={[x, 0.98, 0.18]} rotation={[0.2, 0, 0]} castShadow receiveShadow />
         ))}
         {/* Turn light: a brass strip in front of the rack glows for the player to move. */}
         <mesh position={[0, 0.03, -0.95]}>

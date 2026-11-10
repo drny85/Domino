@@ -38,6 +38,19 @@ function Pips({ value, half }: { value: number; half: -1 | 1 }) {
   );
 }
 
+/** Body, divider, spinner and pips of one tile, centred on its own origin. */
+export function TileBody({ a, b, material }: { a: number; b: number; material: THREE.Material }) {
+  return (
+    <>
+      <RoundedBox args={[TILE_WIDTH, TILE_HEIGHT, TILE_LENGTH]} radius={0.06} smoothness={4} material={material} castShadow receiveShadow />
+      <mesh geometry={dividerGeometry} material={dividerMaterial} position={[0, TOP + 0.001, 0]} />
+      <mesh geometry={spinnerGeometry} material={spinnerMaterial} position={[0, TOP + 0.004, 0]} />
+      <Pips value={a} half={-1} />
+      <Pips value={b} half={1} />
+    </>
+  );
+}
+
 export type DominoTileProps = {
   a: number;
   b: number;
@@ -116,17 +129,13 @@ export const DominoTile = memo(function DominoTile({
       rotation={spring.rotation as unknown as [number, number, number]}
     >
       <group position={[0, TILE_HEIGHT / 2, 0]} {...handlers}>
-        <RoundedBox args={[TILE_WIDTH, TILE_HEIGHT, TILE_LENGTH]} radius={0.06} smoothness={4} material={bodyMaterial} />
+        <TileBody a={a} b={b} material={bodyMaterial} />
         {/* Generous invisible hit area for fingers on small screens. */}
         {ghost && (
           <mesh visible={false}>
             <boxGeometry args={[TILE_WIDTH + 0.8, 0.6, TILE_LENGTH + 0.8]} />
           </mesh>
         )}
-        <mesh geometry={dividerGeometry} material={dividerMaterial} position={[0, TOP + 0.001, 0]} />
-        <mesh geometry={spinnerGeometry} material={spinnerMaterial} position={[0, TOP + 0.004, 0]} />
-        <Pips value={a} half={-1} />
-        <Pips value={b} half={1} />
       </group>
     </animated.group>
   );

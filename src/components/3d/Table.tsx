@@ -1,5 +1,6 @@
 "use client";
 
+import { RoundedBox } from "@react-three/drei";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { getTheme, paintTheme } from "@/lib/themes";
@@ -19,6 +20,9 @@ const RAIL_HEIGHT = 0.9;
 /** The rails rise this far above the playing surface. */
 const RAIL_TOP = 0.55;
 const CORNER = RAIL_WIDTH + 0.5;
+const LEG_LENGTH = 9;
+/** Height of the floor under the table. */
+export const FLOOR_Y = RAIL_TOP - RAIL_HEIGHT - LEG_LENGTH;
 /** Usable length of a tile rack. */
 export const RACK_LENGTH = SURFACE_SIZE * 0.62;
 /** Where a rack sits on its rail, in the rail's local frame (see OpponentRack). */
@@ -77,28 +81,26 @@ function makeWoodTexture(seed: number) {
   return tex;
 }
 
-function Rail({ rotation, wood, darkWood }: { rotation: number; wood: THREE.Material; darkWood: THREE.Material }) {
+function Rail({ rotation, wood, darkWood, brass }: { rotation: number; wood: THREE.Material; darkWood: THREE.Material; brass: THREE.Material }) {
   const length = SURFACE_SIZE;
   const y = RAIL_TOP - RAIL_HEIGHT / 2;
   return (
     <group rotation={[0, rotation, 0]}>
       <group position={[0, 0, HALF + RAIL_WIDTH / 2]}>
-        <mesh position={[0, y, 0]} material={wood}>
-          <boxGeometry args={[length, RAIL_HEIGHT, RAIL_WIDTH]} />
+        <RoundedBox args={[length + 0.2, RAIL_HEIGHT, RAIL_WIDTH]} radius={0.1} smoothness={3} position={[0, y, 0]} material={wood} castShadow receiveShadow />
+        {/* Tile rack: a routed groove with a raised back ledge and a low front lip. */}
+        <mesh position={[0, RAIL_TOP + 0.012, 0.1]} material={darkWood} receiveShadow>
+          <boxGeometry args={[RACK_LENGTH + 1.4, 0.02, 1.15]} />
         </mesh>
-        {/* Tile rack: a shallow tray with a raised back ledge. */}
-        <mesh position={[0, RAIL_TOP + 0.01, 0.1]} material={darkWood}>
-          <boxGeometry args={[RACK_LENGTH, 0.04, 1.15]} />
+        <RoundedBox args={[RACK_LENGTH + 2, 0.24, 0.24]} radius={0.06} smoothness={2} position={[0, RAIL_TOP + 0.1, 0.8]} material={wood} castShadow receiveShadow />
+        <RoundedBox args={[RACK_LENGTH + 2, 0.12, 0.16]} radius={0.04} smoothness={2} position={[0, RAIL_TOP + 0.05, -0.56]} material={wood} castShadow receiveShadow />
+        {/* Stepped moulding and a brass inlay where the rail meets the playing surface.
+            Both sit proud of the rail faces: coplanar faces would shimmer. */}
+        <mesh position={[0, (RAIL_TOP - 0.12) / 2, -RAIL_WIDTH / 2 - 0.07]} material={darkWood} castShadow receiveShadow>
+          <boxGeometry args={[length, RAIL_TOP - 0.12, 0.22]} />
         </mesh>
-        <mesh position={[0, RAIL_TOP + 0.09, 0.78]} material={wood}>
-          <boxGeometry args={[RACK_LENGTH + 0.6, 0.18, 0.22]} />
-        </mesh>
-        <mesh position={[0, RAIL_TOP + 0.05, -0.56]} material={wood}>
-          <boxGeometry args={[RACK_LENGTH + 0.6, 0.1, 0.14]} />
-        </mesh>
-        {/* Inner lip where the rail meets the playing surface. */}
-        <mesh position={[0, RAIL_TOP / 2, -RAIL_WIDTH / 2 + 0.06]} material={darkWood}>
-          <boxGeometry args={[length, RAIL_TOP, 0.12]} />
+        <mesh position={[0, RAIL_TOP + 0.008, -RAIL_WIDTH / 2 + 0.32]} material={brass}>
+          <boxGeometry args={[length - 0.6, 0.016, 0.05]} />
         </mesh>
       </group>
     </group>
@@ -106,22 +108,53 @@ function Rail({ rotation, wood, darkWood }: { rotation: number; wood: THREE.Mate
 }
 
 function Corner({ x, z, wood, steel, steelDark }: { x: number; z: number; wood: THREE.Material; steel: THREE.Material; steelDark: THREE.Material }) {
-  const top = RAIL_TOP + 0.12;
-  const height = RAIL_HEIGHT + 0.12;
+  const top = RAIL_TOP + 0.14;
+  const height = RAIL_HEIGHT + 0.2;
   return (
     <group position={[x, 0, z]}>
-      <mesh position={[0, top - height / 2, 0]} material={wood}>
-        <boxGeometry args={[CORNER, height, CORNER]} />
+      <RoundedBox args={[CORNER, height, CORNER]} radius={0.16} smoothness={3} position={[0, top - height / 2, 0]} material={wood} castShadow receiveShadow />
+      {/* Cup holder: a raised steel rim around a sunken, darker well. */}
+      <mesh position={[0, top + 0.02, 0]} rotation={[Math.PI / 2, 0, 0]} material={steel} castShadow>
+        <torusGeometry args={[1.05, 0.09, 12, 48]} />
       </mesh>
-      {/* Cup holder: steel rim with a recessed, darker base. */}
-      <mesh position={[0, top + 0.012, 0]} material={steel}>
-        <cylinderGeometry args={[1.12, 1.12, 0.03, 40]} />
+      <mesh position={[0, top + 0.012, 0]} material={steelDark} receiveShadow>
+        <cylinderGeometry args={[1.02, 1.02, 0.02, 48]} />
       </mesh>
-      <mesh position={[0, top + 0.03, 0]} material={steelDark}>
-        <cylinderGeometry args={[0.95, 0.95, 0.012, 40]} />
+      <mesh position={[0, top + 0.026, 0]} material={steel}>
+        <cylinderGeometry args={[0.55, 0.55, 0.012, 40]} />
+      </mesh>
+      {/* Leg */}
+      <mesh position={[0, top - height - LEG_LENGTH / 2 + 0.05, 0]} material={wood} castShadow>
+        <cylinderGeometry args={[0.95, 0.6, LEG_LENGTH, 4, 1, false, Math.PI / 4]} />
       </mesh>
     </group>
   );
+}
+
+/** A soft pool of warm light on a dark wooden floor. */
+function makeFloorTexture() {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 20, size / 2, size / 2, size / 2);
+  g.addColorStop(0, "#4a3424");
+  g.addColorStop(0.45, "#2a1d15");
+  g.addColorStop(1, "#120d0a");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  // Floorboards.
+  ctx.strokeStyle = "rgba(0,0,0,0.28)";
+  ctx.lineWidth = 2;
+  for (let x = 0; x <= size; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, size);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 export function Table() {
@@ -146,12 +179,13 @@ export function Table() {
       wood: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.5, metalness: 0.05 }),
       darkWood: new THREE.MeshStandardMaterial({ map: woodTex, color: "#7a6a5e", roughness: 0.7 }),
       steel: new THREE.MeshStandardMaterial({ color: "#d9dde0", roughness: 0.22, metalness: 1 }),
-      steelDark: new THREE.MeshStandardMaterial({ color: "#9aa0a6", roughness: 0.35, metalness: 1 }),
+      steelDark: new THREE.MeshStandardMaterial({ color: "#6f757b", roughness: 0.4, metalness: 1 }),
+      brass: new THREE.MeshStandardMaterial({ color: "#d4a548", roughness: 0.28, metalness: 0.9 }),
+      floorTex: makeFloorTexture(),
     };
   }, []);
   useEffect(
     () => () => {
-      mats.woodTex.dispose();
       Object.values(mats).forEach((m) => m.dispose());
     },
     [mats],
@@ -161,13 +195,13 @@ export function Table() {
   return (
     <group>
       {/* Playing surface with the theme artwork */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[SURFACE_SIZE, SURFACE_SIZE]} />
-        <meshStandardMaterial map={art} roughness={0.82} metalness={0} />
+        <meshStandardMaterial map={art} roughness={0.9} metalness={0} />
       </mesh>
 
       {[0, Math.PI / 2, Math.PI, -Math.PI / 2].map((r) => (
-        <Rail key={r} rotation={r} wood={mats.wood} darkWood={mats.darkWood} />
+        <Rail key={r} rotation={r} wood={mats.wood} darkWood={mats.darkWood} brass={mats.brass} />
       ))}
       {[
         [c, c],
@@ -179,12 +213,12 @@ export function Table() {
       ))}
 
       {/* Apron under the table and the floor below it */}
-      <mesh position={[0, -0.9, 0]} material={mats.darkWood}>
-        <boxGeometry args={[SURFACE_SIZE + RAIL_WIDTH, 1.2, SURFACE_SIZE + RAIL_WIDTH]} />
+      <mesh position={[0, -0.75, 0]} material={mats.darkWood} castShadow>
+        <boxGeometry args={[SURFACE_SIZE + RAIL_WIDTH, 1.1, SURFACE_SIZE + RAIL_WIDTH]} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -6, 0]}>
-        <planeGeometry args={[400, 400]} />
-        <meshStandardMaterial color="#120d0a" roughness={1} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, 0]} receiveShadow>
+        <planeGeometry args={[90, 90]} />
+        <meshStandardMaterial map={mats.floorTex} roughness={0.85} />
       </mesh>
     </group>
   );
