@@ -112,11 +112,11 @@ export default function GameScene(props: SceneProps) {
     >
       <color attach="background" args={["#120d0a"]} />
       <fog attach="fog" args={["#120d0a", 55, 120]} />
-      <ambientLight intensity={0.3} />
+      <ambientLight intensity={0.18} />
       {/* Key light: a lamp above and slightly behind the player, casting soft shadows. */}
       <directionalLight
         position={[7, 18, 9]}
-        intensity={1.7}
+        intensity={2.3}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
@@ -130,7 +130,7 @@ export default function GameScene(props: SceneProps) {
       <Suspense fallback={null}>
         {/* Procedural studio lighting: no HDR files are downloaded. */}
         <Environment resolution={64} frames={1}>
-          <Lightformer form="rect" intensity={2} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[12, 12, 1]} />
+          <Lightformer form="rect" intensity={1.1} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[12, 12, 1]} />
           <Lightformer form="rect" intensity={0.8} position={[-6, 2, 4]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#ffe6c0" />
           <Lightformer form="ring" intensity={0.6} position={[6, 3, -4]} scale={4} color="#c8f0ff" />
         </Environment>
