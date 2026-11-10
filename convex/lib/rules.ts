@@ -171,16 +171,21 @@ export function isBlocked(
   return !hands.some((h) => hasPlayableTile(h, board, ends));
 }
 
-export type MatchType = "1v1" | "2v2" | "cpu";
+export type MatchType = "1v1" | "2v2" | "cpu" | "watch";
+
+/** Four players in two teams: a 2v2 game, or a CPU match being watched. */
+export function isTeamMatch(matchType: MatchType): boolean {
+  return matchType === "2v2" || matchType === "watch";
+}
 
 /** Seats a match type needs before it can start. */
 export function seatsFor(matchType: MatchType): number {
-  return matchType === "2v2" ? 4 : 2;
+  return isTeamMatch(matchType) ? 4 : 2;
 }
 
 /** Team id per seat: partners in 2v2 sit across (0 & 2 vs 1 & 3). */
 export function teamsFor(matchType: MatchType, playerCount: number): number[] {
-  return Array.from({ length: playerCount }, (_, seat) => (matchType === "2v2" ? seat % 2 : seat));
+  return Array.from({ length: playerCount }, (_, seat) => (isTeamMatch(matchType) ? seat % 2 : seat));
 }
 
 /**
@@ -238,6 +243,73 @@ export function chooseCpuMove(hand: Tile[], board: BoardTile[], ends: OpenEnds):
   }
   return best ? { tileId: best.tile.id, side: best.side } : null;
 }
+
+export type CpuLevel = "easy" | "normal" | "hard";
+
+/**
+ * CPU move for a difficulty level.
+ * - easy: any legal tile, at random.
+ * - normal: heaviest tile first (see `chooseCpuMove`).
+ * - hard: also keeps its own options open, sheds doubles, and steers the open
+ *   ends toward numbers the opponents have shown they cannot match.
+ */
+export function chooseCpuMoveForLevel(
+  level: CpuLevel,
+  hand: Tile[],
+  board: BoardTile[],
+  ends: OpenEnds,
+  opponentVoids: number[] = [],
+  random: () => number = Math.random,
+): { tileId: string; side: Side } | null {
+  if (level === "normal") return chooseCpuMove(hand, board, ends);
+  const options: { tile: Tile; side: Side }[] = [];
+  for (const tile of hand) for (const side of validSides(tile, board, ends)) options.push({ tile, side });
+  if (options.length === 0) return null;
+  if (level === "easy") {
+    const pick = options[Math.floor(random() * options.length)];
+    return { tileId: pick.tile.id, side: pick.side };
+  }
+  const voids = new Set(opponentVoids);
+  let best = options[0];
+  let bestScore = -Infinity;
+  for (const o of options) {
+    const next = placeTile(o.tile, o.side, board, ends).openEnds;
+    const rest = hand.filter((t) => t.id !== o.tile.id);
+    const follow = rest.filter((t) => t.a === next.left || t.b === next.left || t.a === next.right || t.b === next.right).length;
+    const blocks = (voids.has(next.left!) ? 1 : 0) + (voids.has(next.right!) ? 1 : 0);
+    const score =
+      o.tile.a + o.tile.b + (o.tile.a === o.tile.b ? 5 : 0) + follow * 3 + blocks * 7 + (rest.length === 0 ? 1000 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = o;
+    }
+  }
+  return { tileId: best.tile.id, side: best.side };
+}
+
+/** Bonus points for a capicúa or for making the whole table pass. */
+export const BONUS_POINTS = 25;
+
+/**
+ * Capicúa: the winning tile fits both open ends at once. Doubles do not count,
+ * and the two ends must show different numbers.
+ */
+export function isCapicua(tile: Tile, ends: OpenEnds): boolean {
+  if (tile.a === tile.b || ends.left === null || ends.right === null || ends.left === ends.right) return false;
+  return (tile.a === ends.left && tile.b === ends.right) || (tile.a === ends.right && tile.b === ends.left);
+}
+
+/** One-tap table talk. Anything else is rejected by the server. */
+export const REACTIONS = ["¡Capicúa!", "¡Tranque!", "Paso", "¡Ahí va!", "¡Dale!", "Buena jugada", "Bring me a drink!", "Take my drink away", "👏", "😂", "😎", "🔥", "😱"] as const;
+/** Hurries the player on the move, so it makes no sense on your own turn. */
+export const HURRY_REACTION = "¡Dale!";
+/** Puts a drink in the cup holder on the sender's right. */
+export const DRINK_REACTION = "Bring me a drink!";
+/** Clears the sender's drink. Offered in place of the drink request while one is out. */
+export const NO_DRINK_REACTION = "Take my drink away";
+
+/** Seat avatars a player can pick. */
+export const AVATARS = ["🙂", "😎", "🤠", "🦁", "🐯", "🦅", "🐓", "🌴", "⚾", "🎩", "👑", "🔥", "🇩🇴", "🇵🇷", "🇨🇺", "🇲🇽", "🇻🇪", "🇨🇴", "🇺🇸", "🇪🇸"] as const;
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // uppercase, no I or O
 

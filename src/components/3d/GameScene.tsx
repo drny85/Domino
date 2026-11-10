@@ -1,13 +1,21 @@
 "use client";
 
-import { ContactShadows, Environment, Lightformer } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useMemo } from "react";
+import { Environment, Lightformer } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { memo, Suspense, useMemo, useRef } from "react";
+import * as THREE from "three";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
 import { footprint, layoutBoard } from "@/lib/boardLayout";
+import { getScene } from "@/lib/scenes";
+import { useThemeStore } from "@/store/useThemeStore";
 import { CameraRig, type Bounds } from "./CameraRig";
+import { BoneyardPile } from "./BoneyardPile";
 import { DominoTile } from "./DominoTile";
+import { HandRack, type HandTileSpec } from "./HandRack";
+import { Drink } from "./Drink";
+import { OpponentRack, type RackSide, type RackSpec } from "./OpponentRack";
+import { SceneProps } from "./SceneProps";
 import { Table } from "./Table";
 
 export type GhostSpec = { side: Side; tile: Tile };
@@ -19,16 +27,42 @@ type SceneProps = {
   ghosts: GhostSpec[];
   onGhost: (side: Side) => void;
   zoom: number;
+  /** Opponents' hands, shown as face-down tiles on their racks. */
+  racks: RackSpec[];
+  /** Sides of the table whose player asked for a drink. */
+  drinks?: RackSide[];
+  /** Lights the strip on the player's own (south) rail. */
+  myTurn: boolean;
+  /** The player's own tiles, standing in their rack. */
+  hand: HandTileSpec[];
+  onHandTap: (id: string) => void;
+  /** Face-down tiles left to draw (0 hides the pile). */
+  boneyardCount: number;
+  /** Called once, after the first frame has been drawn. */
+  onReady?: () => void;
 };
+
+function FirstFrame({ onReady }: { onReady?: () => void }) {
+  const done = useRef(false);
+  useFrame(() => {
+    if (!done.current) {
+      done.current = true;
+      // The frame being drawn now is on screen by the next tick.
+      requestAnimationFrame(() => onReady?.());
+    }
+  });
+  return null;
+}
 
 /** Narrower rows on portrait screens so the snake grows downward. */
 function rowLimitFor(aspect: number) {
-  if (aspect < 0.75) return 3.5;
-  if (aspect < 1.25) return 5.5;
-  return 8;
+  if (aspect < 0.8) return 3.5;
+  if (aspect < 1.25) return 4.5;
+  return 6;
 }
 
-function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: SceneProps) {
+function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: SceneProps) {
+  const handCount = hand.length;
   const { size } = useThree();
   const limit = rowLimitFor(size.width / Math.max(size.height, 1));
 
@@ -50,7 +84,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
 
   const bounds = useMemo<Bounds>(() => {
     const all = [...placed, ...ghostPlacements.map((g) => g.p)];
-    if (all.length === 0) return { minX: -2, maxX: 2, minZ: -2, maxZ: 2 };
+    if (all.length === 0) return { minX: -1, maxX: 1, minZ: -1, maxZ: 1 };
     return all.map(footprint).reduce((acc, f) => ({
       minX: Math.min(acc.minX, f.minX),
       maxX: Math.max(acc.maxX, f.maxX),
@@ -61,7 +95,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
 
   return (
     <>
-      <CameraRig bounds={bounds} zoom={zoom} />
+      <CameraRig bounds={bounds} zoom={zoom} handCount={handCount} />
       {placed.map((t) => (
         <DominoTile
           key={t.id}
@@ -88,30 +122,67 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom }: ScenePr
   );
 }
 
-export default function GameScene(props: SceneProps) {
+function GameScene(props: SceneProps) {
+  const scene = getScene(useThemeStore((s) => s.sceneId));
   return (
     <Canvas
+      shadows
+      // Draw only when something moves: an idle table costs the phone nothing.
+      frameloop="demand"
       dpr={[1, 2]}
-      camera={{ fov: 42, position: [0, 14, 8], near: 0.1, far: 300 }}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+      // Measure the layout box, not the on-screen box: the game screen may be CSS-rotated.
+      resize={{ offsetSize: true }}
+      // A tight depth range keeps close surfaces from shimmering at a distance.
+      camera={{ fov: 42, position: [0, 14, 8], near: 2, far: 160 }}
+      gl={{ antialias: true, powerPreference: "high-performance", toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
       style={{ touchAction: "none" }}
     >
-      <color attach="background" args={["#08140f"]} />
-      <fog attach="fog" args={["#08140f", 40, 90]} />
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[6, 14, 8]} intensity={1.6} />
+      <color attach="background" args={[scene.haze]} />
+      <fog attach="fog" args={[scene.haze, 55, 95]} />
+      {/* Sky light from above, warm bounce from the floor below. */}
+      <hemisphereLight args={["#fff6e6", "#6b4a30", 0.35 + scene.ambient]} />
+      {/* Key light: above and slightly behind the player, casting soft shadows. */}
+      <directionalLight
+        position={[7, 18, 9]}
+        intensity={2.2}
+        color={scene.sun}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.03}
+        shadow-radius={6}
+      >
+        <orthographicCamera attach="shadow-camera" args={[-16, 16, 16, -16, 1, 60]} />
+      </directionalLight>
+      {/* The lamp over the table: a warm pool on the felt that falls off toward the rails. */}
+      <spotLight position={[0, 15, 1]} angle={0.72} penumbra={0.9} intensity={150} decay={2} distance={40} color="#ffe8c4" />
+      {/* Low light from the player's side, so the faces of their own tiles read bright. */}
+      <directionalLight position={[0, 9, 22]} intensity={0.7} color="#fff3e0" />
       <directionalLight position={[-8, 10, -6]} intensity={0.4} color="#ffe2b0" />
       <Suspense fallback={null}>
         {/* Procedural studio lighting: no HDR files are downloaded. */}
-        <Environment resolution={64} frames={1}>
-          <Lightformer form="rect" intensity={2} position={[0, 6, 0]} rotation-x={Math.PI / 2} scale={[12, 12, 1]} />
-          <Lightformer form="rect" intensity={0.8} position={[-6, 2, 4]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#ffe6c0" />
-          <Lightformer form="ring" intensity={0.6} position={[6, 3, -4]} scale={4} color="#c8f0ff" />
+        <Environment resolution={256} frames={1}>
+          <color attach="background" args={["#2a241e"]} />
+          <Lightformer form="rect" intensity={1.3} position={[0, 7, 0]} rotation-x={Math.PI / 2} scale={[14, 10, 1]} color="#fff4e2" />
+          <Lightformer form="rect" intensity={0.8} position={[-8, 3, 4]} rotation-y={Math.PI / 2} scale={[10, 3, 1]} color="#ffe6c0" />
+          <Lightformer form="rect" intensity={0.7} position={[8, 3, -2]} rotation-y={-Math.PI / 2} scale={[10, 3, 1]} color="#dff0ff" />
+          <Lightformer form="rect" intensity={0.6} position={[0, 3, 10]} rotation-y={Math.PI} scale={[12, 3, 1]} color="#ffffff" />
         </Environment>
       </Suspense>
       <Table />
-      <ContactShadows position={[0, 0.005, 0]} scale={44} resolution={512} blur={2.2} opacity={0.55} far={2} />
+      <SceneProps sceneId={scene.id} />
+      <OpponentRack side="south" count={0} active={props.myTurn} />
+      {props.racks.map((r) => (
+        <OpponentRack key={r.side} {...r} />
+      ))}
+      <HandRack tiles={props.hand} onTap={props.onHandTap} />
+      {props.drinks?.map((side) => <Drink key={side} side={side} />)}
+      <BoneyardPile count={props.boneyardCount} />
       <Board {...props} />
+      <FirstFrame onReady={props.onReady} />
     </Canvas>
   );
 }
+
+// The parent redraws often (timers, reactions); the table only when its own inputs change.
+export default memo(GameScene);

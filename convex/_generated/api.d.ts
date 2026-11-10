@@ -9,7 +9,8 @@
    */
   
   import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
-  import type * as games from "../games.js";
+  import type * as crons from "../crons.js";
+import type * as games from "../games.js";
 import type * as lib_rules from "../lib/rules.js";
 
   /**
@@ -21,7 +22,8 @@ import type * as lib_rules from "../lib/rules.js";
    * ```
    */
   declare const fullApi: ApiFromModules<{
-    "games": typeof games,
+    "crons": typeof crons,
+"games": typeof games,
 "lib/rules": typeof lib_rules,
   }>;
   export declare const api: FilterApi<typeof fullApi, FunctionReference<any, "public">>;

@@ -1,47 +1,99 @@
 "use client";
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { handLayout } from "./HandRack";
+import { RACK_Z, TABLE_HALF } from "./Table";
 
 export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
+const TILT = THREE.MathUtils.degToRad(33);
+const SIN = Math.sin(TILT);
+const COS = Math.cos(TILT);
+/** Portrait screens never zoom in past this half-width, so a short chain is not huge. */
+const PORTRAIT_MIN_HALF_WIDTH = 4.6;
+/** Canvases shorter than this (a phone on its side) also use the close framing. */
+const CLOSE_MAX_HEIGHT = 520;
+
+type Point = [x: number, y: number, z: number];
+
 /**
- * Keeps the whole chain in view. Looks down at a steep angle and picks the
- * distance from the camera's FOV and the screen's aspect ratio, so the same
- * board fits a portrait phone and a widescreen monitor. Eases toward the
- * target each frame, and lets the player zoom with the slider factor.
+ * Sits at the player's side of the table looking down at it, like a seated
+ * player. Wide screens show the whole table. Phones held upright come in
+ * close: just the chain and the player's own rack, so tiles stay readable.
+ * The +/- buttons scale the distance.
  */
-export function CameraRig({ bounds, zoom = 1 }: { bounds: Bounds; zoom?: number }) {
-  const { camera, size } = useThree();
-  const target = useRef(new THREE.Vector3());
+export function CameraRig({ bounds, zoom = 1, handCount = 7 }: { bounds: Bounds; zoom?: number; handCount?: number }) {
+  const { camera, size, invalidate } = useThree();
   const desired = useRef(new THREE.Vector3());
   const look = useRef(new THREE.Vector3());
+  const target = useRef(new THREE.Vector3());
 
   useFrame((_, dt) => {
     const cam = camera as THREE.PerspectiveCamera;
     const aspect = size.width / Math.max(size.height, 1);
-    const margin = 1.6;
-    const halfW = Math.max((bounds.maxX - bounds.minX) / 2 + margin, 3.2);
-    const halfD = Math.max((bounds.maxZ - bounds.minZ) / 2 + margin, 3.2);
+    const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    const tanH = tanV * aspect;
+
+    const portrait = aspect < 1;
+    // Phones, upright or on their side, come in close; big screens show the whole table.
+    const close = portrait || size.height < CLOSE_MAX_HEIGHT;
+    const hand = handLayout(handCount, portrait);
+    const handHalf = hand.halfWidth + 0.35;
+    const handTop = 2.1 * hand.scale + 0.8;
+
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cz = (bounds.minZ + bounds.maxZ) / 2;
+    // Follow the chain a little, but stay anchored to the table. Portrait
+    // leans toward the player, where the chain and the rack both are.
+    target.current.set(cx * 0.6, 0, close ? Math.max(cz * 0.6, 0) + 3 : cz * 0.6 + 1);
+    const tx = target.current.x;
+    const tz = target.current.z;
 
-    const vFov = THREE.MathUtils.degToRad(cam.fov);
-    const tanV = Math.tan(vFov / 2);
-    const tanH = tanV * aspect;
-    // Tilt from vertical; foreshortening of depth handled by the cos term.
-    const tilt = THREE.MathUtils.degToRad(28);
-    const dist = Math.max(halfW / tanH, (halfD * Math.cos(tilt)) / tanV + halfD * Math.sin(tilt)) * 1.05 * zoom;
+    // Smallest camera distance that keeps a world point inside the frame.
+    const need = ([x, y, z]: Point) => {
+      const rx = x - tx;
+      const rz = z - tz;
+      const along = y * COS + rz * SIN; // how far the point sits toward the camera
+      const up = y * SIN - rz * COS; // offset along the camera's up axis
+      return Math.max(Math.abs(rx) / tanH, Math.abs(up) / tanV) + along;
+    };
 
-    target.current.set(cx, 0, cz);
-    desired.current.set(cx, Math.cos(tilt) * dist, cz + Math.sin(tilt) * dist);
+    const margin = close ? 0.9 : 1.4;
+    const points: Point[] = [
+      // The player's hand, standing in the near rack.
+      [-handHalf, 0.6, RACK_Z],
+      [handHalf, 0.6, RACK_Z],
+      [0, handTop, RACK_Z],
+      // The near edge, plus room for the bar that floats over it on phones.
+      [0, 0.4, TABLE_HALF + (close && !portrait ? 1.6 : 0.2)],
+      // The chain.
+      [bounds.minX - margin, 0, bounds.minZ - margin],
+      [bounds.maxX + margin, 0, bounds.minZ - margin],
+      [bounds.minX - margin, 0, bounds.maxZ + margin],
+      [bounds.maxX + margin, 0, bounds.maxZ + margin],
+    ];
+    if (close) {
+      points.push([tx - PORTRAIT_MIN_HALF_WIDTH, 0, tz], [tx + PORTRAIT_MIN_HALF_WIDTH, 0, tz]);
+    } else {
+      // Room for the far rack and the whole table, corner blocks included.
+      points.push([0, 2.8, -RACK_Z]);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) points.push([sx * (TABLE_HALF + 0.4), 0.6, sz * (TABLE_HALF + 0.4)]);
+    }
 
-    const k = 1 - Math.exp(-dt * 4);
+    const dist = Math.max(...points.map(need)) * 1.02 * zoom;
+    desired.current.set(tx, COS * dist, tz + SIN * dist);
+
+    const k = 1 - Math.exp(-dt * 3.5);
     cam.position.lerp(desired.current, k);
     look.current.lerp(target.current, k);
     cam.lookAt(look.current);
+    // Frames are drawn on demand: keep asking for them until the camera has settled.
+    if (cam.position.distanceToSquared(desired.current) > 1e-5 || look.current.distanceToSquared(target.current) > 1e-5) invalidate();
   });
+  // A new framing (zoom button, bigger chain, different hand) starts the glide.
+  useEffect(() => invalidate(), [invalidate, bounds, zoom, handCount, size.width, size.height]);
 
   return null;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -20,10 +21,11 @@ export function TargetScoreToggle({
   onError?: (msg: string) => void;
 }) {
   const setTarget = useMutation(api.games.setTargetScore);
+  const t = useT();
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm text-stone-300">Points to win</span>
-      <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label="Points to win">
+      <span className="text-sm text-stone-300">{t("Points to win")}</span>
+      <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Points to win")}>
         {([100, 200] as const).map((pts) => (
           <button
             key={pts}

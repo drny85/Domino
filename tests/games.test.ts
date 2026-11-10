@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, expect, it, vi } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 import { validSides } from "../convex/lib/rules";
 
@@ -61,7 +61,7 @@ describe("information hiding", () => {
     expect(s!.room.boneyardCount).toBe(0);
     for (const o of s!.opponents) {
       expect(Object.keys(o).sort()).toEqual(
-        ["finalPips", "id", "isBot", "isConnected", "name", "score", "seatIndex", "team", "tileCount"].sort(),
+        ["avatar", "drink", "finalPips", "id", "isBot", "name", "reaction", "score", "seatIndex", "team", "tileCount"].sort(),
       );
       expect(o.tileCount).toBe(7);
     }
@@ -275,4 +275,219 @@ describe("points to win", () => {
     }
     throw new Error(`match did not finish after ${rounds} rounds`);
   }, 60000);
+});
+
+describe("house rules and table extras", () => {
+  it("only the host changes the rules, and they show in the state", async () => {
+    const { t, roomId } = await setupRoom(2);
+    await expect(t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(1), bonuses: true })).rejects.toThrow(/host/);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true, turnSeconds: 20, cpuLevel: "hard" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(s.room.bonuses).toBe(true);
+    expect(s.room.turnSeconds).toBe(20);
+    expect(s.room.cpuLevel).toBe("hard");
+  });
+
+  it("accepts listed reactions and avatars only", async () => {
+    const { t, roomId, code } = await setupRoom(1);
+    await t.mutation(api.games.joinRoom, { code, sessionId: S(1), playerName: "P1", avatar: "🦁" });
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: S(1), reaction: "<b>hi</b>" })).rejects.toThrow(/Unknown/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: S(1), reaction: "¡Capicúa!" });
+    await t.mutation(api.games.setAvatar, { roomId, sessionId: S(0), avatar: "not-an-avatar" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.opponents[0].reaction?.text).toBe("¡Capicúa!");
+    expect(s.opponents[0].avatar).toBe("🦁");
+    expect(s.me!.avatar).toBeNull();
+    // A drink stays at the seat once asked for; hurrying needs a game with someone else on the move.
+    expect(s.opponents[0].drink).toBe(false);
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: S(0), reaction: "¡Dale!" })).rejects.toThrow(/someone else/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: S(0), reaction: "Bring me a drink!" });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const g = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(g.me!.drink).toBe(true);
+    const mover = g.me!.isMyTurn ? S(0) : S(1);
+    const waiter = g.me!.isMyTurn ? S(1) : S(0);
+    await expect(t.mutation(api.games.sendReaction, { roomId, sessionId: mover, reaction: "¡Dale!" })).rejects.toThrow(/someone else/);
+    await t.mutation(api.games.sendReaction, { roomId, sessionId: waiter, reaction: "¡Dale!" });
+  });
+
+  it.each([20, 0] as const)("plays for players who run out of time or drop off (timer %i)", async (turnSeconds) => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const first = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(first.room.turnDeadline === null).toBe(turnSeconds === 0);
+    // Nobody touches the game: the server finishes the round on its own.
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.status).toBe("finished");
+    expect(s.room.lastAction?.auto).toBe(true);
+    expect(s.room.lastRound).not.toBeNull();
+    // With the host gone, another player may deal the next round.
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(1) });
+    vi.useRealTimers();
+  });
+});
+
+describe("who opens", () => {
+  it("the round winner opens the next round, and the highest double opens a new match", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2, "block");
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const holdsHighestDouble = async () => {
+      const hands = await t.run(async (ctx) => (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex).map((p) => p.hand));
+      const best = (h: typeof hands[number]) => Math.max(-1, ...h.filter((x) => x.a === x.b).map((x) => x.a));
+      return best(hands[0]) === best(hands[1]) ? null : best(hands[0]) > best(hands[1]) ? 0 : 1;
+    };
+    const first = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    const expected = await holdsHighestDouble();
+    if (expected !== null) expect(first.room.currentTurnSeat).toBe(expected);
+
+    for (let round = 0; round < 12; round++) {
+      await t.finishAllScheduledFunctions(vi.runAllTimers); // the server plays the round out
+      const end = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      expect(end.room.status).toBe("finished");
+      await t.mutation(api.games.startGame, { roomId, sessionId: S(1) });
+      const next = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      if (end.room.matchOver) {
+        expect(next.room.round).toBe(1);
+        const dbl = await holdsHighestDouble();
+        if (dbl !== null) expect(next.room.currentTurnSeat).toBe(dbl);
+      } else if (end.room.winnerSeat !== null) {
+        expect(next.room.currentTurnSeat).toBe(end.room.winnerSeat);
+      }
+    }
+    vi.useRealTimers();
+  });
+});
+
+describe("watching a CPU match", () => {
+  it("four CPUs play a whole match to 100 on their own while the creator watches", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId, code } = await t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw", matchType: "watch", targetScore: 100 });
+    await expect(t.mutation(api.games.joinRoom, { code, sessionId: S(1), playerName: "X" })).rejects.toThrow(/watching/);
+    const start = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(start.me).toBeNull();
+    expect(start.spectator?.isHost).toBe(true);
+    expect(start.spectator?.hand).toHaveLength(7);
+    expect(start.opponents).toHaveLength(4);
+    expect(start.opponents.every((o) => o.isBot)).toBe(true);
+    expect(start.room.status).toBe("playing");
+
+    // The viewer stays: their pings keep the match dealing round after round.
+    for (let i = 0; i < 20_000; i++) {
+      if (i % 30 === 0) {
+        await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+        if ((await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!.room.matchOver) break;
+      }
+      vi.advanceTimersByTime(1000);
+      await t.finishInProgressScheduledFunctions();
+    }
+    const end = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(end.room.matchOver).toBe(true);
+    expect(end.room.round).toBeGreaterThan(1);
+    const team = (n: number) => end.opponents.filter((o) => o.team === n).reduce((a, o) => a + o.score, 0);
+    expect(Math.max(team(0), team(1))).toBeGreaterThanOrEqual(100);
+    // The creator can ask for a rematch; a stranger cannot.
+    await expect(t.mutation(api.games.startGame, { roomId, sessionId: S(5) })).rejects.toThrow(/host/);
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    vi.useRealTimers();
+  });
+});
+
+describe("load and housekeeping", () => {
+  it("a watched match stops dealing when the viewer leaves and resumes when they return", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { roomId } = await t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw", matchType: "watch", targetScore: 200 });
+    // Nobody pings: play goes on for two minutes, then nothing more is dealt.
+    await t.finishAllScheduledFunctions(vi.runAllTimers, 20_000);
+    const idle = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(idle.room.status).toBe("finished");
+    expect(idle.room.matchOver).toBe(false);
+    expect(idle.room.round).toBeLessThan(9);
+    // The viewer comes back.
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+    vi.advanceTimersByTime(7000);
+    await t.finishInProgressScheduledFunctions();
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!.room.round).toBe(idle.room.round! + 1);
+    vi.useRealTimers();
+  });
+
+  it("pings are kept apart from the game, and show who is online", async () => {
+    const { t, roomId } = await setupRoom(2);
+    const before = await t.run(async (ctx) => (await ctx.db.query("players").collect()).map((p) => p.lastSeen));
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(1) });
+    const after = await t.run(async (ctx) => (await ctx.db.query("players").collect()).map((p) => p.lastSeen));
+    expect(after).toEqual(before);
+    const presence = await t.query(api.games.getPresence, { roomId });
+    expect(presence.seats.map((s) => s.seatIndex).sort()).toEqual([0, 1]);
+    expect(presence.seats.every((s) => presence.now - s.lastSeen < 5000)).toBe(true);
+    // A stranger's ping is ignored.
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(7) });
+    expect(await t.run(async (ctx) => (await ctx.db.query("presence").collect()).length)).toBe(1);
+  });
+
+  it("limits how fast one device can open rooms", async () => {
+    const t = convexTest(schema, modules);
+    const open = () => t.mutation(api.games.createRoom, { sessionId: S(0), playerName: "Me", mode: "draw" });
+    for (let i = 0; i < 5; i++) await open();
+    await expect(open()).rejects.toThrow(/Too many new rooms/);
+    // Another device is not affected.
+    await t.mutation(api.games.createRoom, { sessionId: S(1), playerName: "Other", mode: "draw" });
+  });
+
+  it("removes rooms left idle for a day, with their players and pings", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    await t.mutation(api.games.heartbeat, { roomId, sessionId: S(0) });
+    vi.advanceTimersByTime(23 * 60 * 60 * 1000);
+    expect(await t.mutation(internal.games.cleanupRooms, {})).toBe(0);
+    const fresh = await t.mutation(api.games.createRoom, { sessionId: S(3), playerName: "New", mode: "draw" });
+    vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+    expect(await t.mutation(internal.games.cleanupRooms, {})).toBe(1);
+    const left = await t.run(async (ctx) => ({
+      rooms: (await ctx.db.query("rooms").collect()).map((r) => r._id),
+      players: (await ctx.db.query("players").collect()).length,
+      pings: (await ctx.db.query("presence").collect()).length,
+    }));
+    expect(left).toEqual({ rooms: [fresh.roomId], players: 1, pings: 0 });
+    vi.useRealTimers();
+  });
+});
+
+describe("rule changes during a match", () => {
+  it("are recorded for every player and repeated when the next round is dealt", async () => {
+    vi.useFakeTimers();
+    const { t, roomId } = await setupRoom(2);
+    // Before the first deal nothing is announced.
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!.room.rulesChange).toBeNull();
+    await t.finishAllScheduledFunctions(vi.runAllTimers); // the round plays itself out
+
+    await t.mutation(api.games.setTargetScore, { roomId, sessionId: S(0), targetScore: 100 });
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 30, bonuses: true });
+    const guest = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(guest.room.rulesChange?.changes).toEqual([
+      { key: "target", value: "100", from: "200" },
+      { key: "timer", value: "30", from: "0" },
+    ]);
+    expect(guest.room.rulesChange?.applied).toBeUndefined();
+    // Putting a rule back to what it was drops it from the announcement.
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 0 });
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!.room.rulesChange?.changes).toEqual([
+      { key: "target", value: "100", from: "200" },
+    ]);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), turnSeconds: 30 });
+    const at = guest.room.rulesChange!.at;
+    vi.advanceTimersByTime(1000);
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const next = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(next.room.rulesChange?.applied).toBe(true);
+    expect(next.room.rulesChange!.at).toBeGreaterThan(at);
+    vi.useRealTimers();
+  });
 });

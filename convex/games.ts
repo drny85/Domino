@@ -2,15 +2,24 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { matchTypeValidator, modeValidator, targetScoreValidator } from "./schema";
+import { cpuLevelValidator, matchTypeValidator, modeValidator, targetScoreValidator, turnSecondsValidator } from "./schema";
 import {
+  AVATARS,
+  BONUS_POINTS,
+  DRINK_REACTION,
+  NO_DRINK_REACTION,
+  HURRY_REACTION,
+  REACTIONS,
   blockedWinner,
   chooseCpuMove,
+  chooseCpuMoveForLevel,
+  isCapicua,
   chooseOpeningTile,
   deal,
   findStartingPlayer,
   generateRoomCode,
   hasPlayableTile,
+  isTeamMatch,
   isBlocked,
   pipTotal,
   placeTile,
@@ -21,12 +30,31 @@ import {
   type Side,
 } from "./lib/rules";
 
-/** A player counts as connected if they sent a heartbeat this recently. */
-const CONNECTED_WINDOW_MS = 30_000;
 const MAX_NAME_LENGTH = 24;
 /** Delay before the CPU acts, so humans can follow what happened. */
 const CPU_THINK_MS = 900;
 export const DEFAULT_TARGET_SCORE = 200;
+/** A human who has been silent this long gets their turn played for them. */
+const AWAY_MS = 40_000;
+/** How often an open human turn is re-checked for a timeout or an absent player. */
+const AWAY_CHECK_MS = 15_000;
+/** Pause before the server plays for someone who is already away. */
+const STAND_IN_DELAY_MS = 2_500;
+const REACTION_COOLDOWN_MS = 1_200;
+/** A watched CPU match stops dealing once its viewer has been gone this long. */
+const WATCH_IDLE_MS = 120_000;
+/** Rooms nobody has touched for this long are removed. */
+const ROOM_IDLE_MS = 24 * 60 * 60 * 1000;
+/** One device may open this many rooms a minute. */
+const ROOMS_PER_MINUTE = 5;
+/** Pause on the round summary before a watched CPU match deals again. */
+const WATCH_NEXT_ROUND_MS = 6_000;
+const WATCH_BOTS = [
+  { name: "Tío Luis", avatar: "🤠" },
+  { name: "Doña Ana", avatar: "👑" },
+  { name: "Pepe", avatar: "🐓" },
+  { name: "Carmen", avatar: "😎" },
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,6 +63,55 @@ export const DEFAULT_TARGET_SCORE = 200;
 function cleanName(name: string): string {
   const trimmed = name.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
   return trimmed || "Guest";
+}
+
+function cleanAvatar(avatar: string | undefined): string | undefined {
+  return avatar !== undefined && (AVATARS as readonly string[]).includes(avatar) ? avatar : undefined;
+}
+
+/**
+ * Notes a rule the host changed once the match is under way, so every player
+ * is told. Changes made before the first deal are visible in the lobby anyway.
+ */
+type RuleChange = { key: string; value: string; from?: string };
+
+function withRuleChange(room: Doc<"rooms">, changes: RuleChange[]) {
+  if (room.status === "waiting" || changes.length === 0) return {};
+  // Keep earlier changes from the same break between rounds: newest value per
+  // rule, measured against what the rule was when the last round was played.
+  const earlier = room.rulesChange && !room.rulesChange.applied ? room.rulesChange.changes : [];
+  const merged = [
+    ...earlier.filter((c) => !changes.some((n) => n.key === c.key)),
+    ...changes.map((n) => {
+      const before = earlier.find((c) => c.key === n.key);
+      return before ? { ...n, from: before.from } : n;
+    }),
+  ].filter((c) => c.from !== c.value); // put back to what it was: nothing to announce
+  return { rulesChange: merged.length ? { at: Date.now(), changes: merged } : undefined };
+}
+
+async function presenceRow(ctx: QueryCtx, roomId: Id<"rooms">, sessionId: string) {
+  return await ctx.db
+    .query("presence")
+    .withIndex("by_room_session", (q) => q.eq("roomId", roomId).eq("sessionId", sessionId))
+    .unique();
+}
+
+/** Removes a room with its players and presence rows. */
+async function deleteRoom(ctx: MutationCtx, roomId: Id<"rooms">) {
+  for (const p of await getPlayers(ctx, roomId)) await ctx.db.delete(p._id);
+  const pings = await ctx.db
+    .query("presence")
+    .withIndex("by_room", (q) => q.eq("roomId", roomId))
+    .collect();
+  for (const r of pings) await ctx.db.delete(r._id);
+  await ctx.db.delete(roomId);
+}
+
+/** Last sign of life from a player: their latest move or their latest ping. */
+async function lastSeenOf(ctx: QueryCtx, p: Doc<"players">) {
+  const row = await presenceRow(ctx, p.roomId, p.sessionId);
+  return Math.max(p.lastSeen ?? 0, row?.lastSeen ?? 0);
 }
 
 function assertSessionId(sessionId: string) {
@@ -83,13 +160,16 @@ async function finishRound(
   players: Doc<"players">[],
   winnerIdx: number | null,
   winReason: "domino" | "blocked" | "blocked-tie",
+  bonus: { points: number; kind: string } | null = null,
 ) {
   const hands = players.map((p) => p.hand);
   const teams = teamsOf(room, players);
   const scores = players.map((p) => p.score);
+  let points = 0;
   if (winnerIdx !== null) {
     const winner = players[winnerIdx];
-    scores[winnerIdx] += roundPoints(hands, winnerIdx, teams);
+    points = roundPoints(hands, winnerIdx, teams) + (bonus?.points ?? 0);
+    scores[winnerIdx] += points;
     await ctx.db.patch(winner._id, { score: scores[winnerIdx] });
   }
 
@@ -106,7 +186,12 @@ async function finishRound(
     winReason,
     matchOver,
     matchWinnerTeam: matchOver ? leader[0] : undefined,
+    lastRound: { points, bonus: bonus?.points ?? 0, bonusKind: bonus?.kind },
+    turnDeadline: undefined,
   });
+  if (room.matchType === "watch" && !matchOver) {
+    await ctx.scheduler.runAfter(WATCH_NEXT_ROUND_MS, internal.games.autoNextRound, { roomId: room._id, round: room.round ?? 0 });
+  }
 }
 
 async function endIfBlocked(
@@ -122,20 +207,40 @@ async function endIfBlocked(
   return true;
 }
 
-/** If it's now a CPU's turn, schedule its move. */
-async function scheduleCpuIfNeeded(ctx: MutationCtx, roomId: Id<"rooms">) {
+/**
+ * Sets up whatever has to happen next without a player acting: a CPU move, or
+ * the clock on a human turn (turn timer, and a stand-in for an absent player).
+ */
+async function scheduleNext(ctx: MutationCtx, roomId: Id<"rooms">) {
   const room = await ctx.db.get(roomId);
   if (!room || room.status !== "playing") return;
   const players = await getPlayers(ctx, roomId);
   const current = players.find((p) => p.seatIndex === room.currentTurnSeat);
-  if (current?.isBot) {
+  if (!current) return;
+  if (current.isBot) {
+    // The last human's clock does not apply to the CPU.
+    if (room.turnDeadline !== undefined) await ctx.db.patch(roomId, { turnDeadline: undefined });
     await ctx.scheduler.runAfter(CPU_THINK_MS, internal.games.cpuTurn, {
       roomId,
       expectedSeat: room.currentTurnSeat,
       expectedBoardLength: room.board.length,
       expectedHandSize: current.hand.length,
     });
+    return;
   }
+
+  const turnId = room.turnId ?? 0;
+  if (room.timerTurnId === turnId) return; // this turn's clock is already running
+  const now = Date.now();
+  const seconds = room.turnSeconds ?? 0;
+  const deadline = seconds > 0 ? now + seconds * 1000 : undefined;
+  await ctx.db.patch(roomId, { timerTurnId: turnId, turnDeadline: deadline });
+  // Solo games against the CPU wait for the player unless a timer is set.
+  const watchAway = room.matchType !== "cpu";
+  if (deadline === undefined && !watchAway) return;
+  const away = watchAway && now - (await lastSeenOf(ctx, current)) > AWAY_MS;
+  const delay = away ? STAND_IN_DELAY_MS : Math.min(deadline !== undefined ? deadline - now : Infinity, AWAY_CHECK_MS);
+  await ctx.scheduler.runAfter(delay, internal.games.turnTick, { roomId, turnId });
 }
 
 async function applyPlay(
@@ -145,6 +250,7 @@ async function applyPlay(
   me: Doc<"players">,
   tileId: string,
   targetSide: Side,
+  auto = false,
 ) {
   const tile = me.hand.find((t) => t.id === tileId);
   if (!tile) throw new Error("That tile is not in your hand");
@@ -157,17 +263,21 @@ async function applyPlay(
   await ctx.db.patch(me._id, { hand, lastSeen: Date.now() });
 
   const updatedPlayers = players.map((p) => (p._id === me._id ? { ...p, hand } : p));
-  const lastAction = { seatIndex: me.seatIndex, kind: "play", tileId, at: Date.now() };
+  const lastAction = { seatIndex: me.seatIndex, kind: "play", tileId, at: Date.now(), ...(auto ? { auto } : {}) };
   await ctx.db.patch(room._id, { board, openEnds, consecutivePasses: 0, lastAction });
   const updatedRoom = { ...room, board, openEnds };
 
   if (hand.length === 0) {
-    await finishRound(ctx, updatedRoom, updatedPlayers, me.seatIndex, "domino");
+    const capicua = !!room.bonuses && room.board.length > 0 && isCapicua(tile, room.openEnds);
+    await finishRound(ctx, updatedRoom, updatedPlayers, me.seatIndex, "domino", capicua ? { points: BONUS_POINTS, kind: "capicua" } : null);
     return "won" as const;
   }
   if (await endIfBlocked(ctx, updatedRoom, updatedPlayers, room.boneyard.length)) return "blocked" as const;
 
-  await ctx.db.patch(room._id, { currentTurnSeat: (room.currentTurnSeat + 1) % players.length });
+  await ctx.db.patch(room._id, {
+    currentTurnSeat: (room.currentTurnSeat + 1) % players.length,
+    turnId: (room.turnId ?? 0) + 1,
+  });
   return "played" as const;
 }
 
@@ -176,10 +286,18 @@ async function applyDrawOrPass(
   room: Doc<"rooms">,
   players: Doc<"players">[],
   me: Doc<"players">,
+  auto = false,
 ) {
   if (room.board.length === 0 || hasPlayableTile(me.hand, room.board, room.openEnds)) {
     throw new Error("You have a playable tile");
   }
+
+  // Everyone saw this player fail to match the open ends.
+  const voids = players.map((_, i) => [...(room.voids?.[i] ?? [])]);
+  for (const n of [room.openEnds.left, room.openEnds.right]) {
+    if (n !== null && voids[me.seatIndex] && !voids[me.seatIndex].includes(n)) voids[me.seatIndex].push(n);
+  }
+  const flag = auto ? { auto } : {};
 
   if (room.mode === "draw" && room.boneyard.length > 0) {
     const boneyard = [...room.boneyard];
@@ -187,17 +305,32 @@ async function applyDrawOrPass(
     await ctx.db.patch(me._id, { hand: [...me.hand, drawn], lastSeen: Date.now() });
     await ctx.db.patch(room._id, {
       boneyard,
-      lastAction: { seatIndex: me.seatIndex, kind: "draw", at: Date.now() },
+      voids,
+      lastAction: { seatIndex: me.seatIndex, kind: "draw", at: Date.now(), ...flag },
     });
     return "drew" as const;
   }
 
   if (await endIfBlocked(ctx, room, players, room.boneyard.length)) return "blocked" as const;
 
+  const passes = (room.consecutivePasses ?? 0) + 1;
+  const nextSeat = (room.currentTurnSeat + 1) % players.length;
+  // Pase corrido (four players): the whole table passed on one player's tile.
+  let bonusEvent: Doc<"rooms">["bonusEvent"] = undefined;
+  if (room.bonuses && players.length === 4 && passes === 3) {
+    const lucky = players.find((p) => p.seatIndex === nextSeat);
+    if (lucky) {
+      await ctx.db.patch(lucky._id, { score: lucky.score + BONUS_POINTS });
+      bonusEvent = { seatIndex: nextSeat, kind: "pase", points: BONUS_POINTS, at: Date.now() };
+    }
+  }
   await ctx.db.patch(room._id, {
-    currentTurnSeat: (room.currentTurnSeat + 1) % players.length,
-    consecutivePasses: (room.consecutivePasses ?? 0) + 1,
-    lastAction: { seatIndex: me.seatIndex, kind: "pass", at: Date.now() },
+    currentTurnSeat: nextSeat,
+    turnId: (room.turnId ?? 0) + 1,
+    consecutivePasses: passes,
+    voids,
+    lastAction: { seatIndex: me.seatIndex, kind: "pass", at: Date.now(), ...flag },
+    ...(bonusEvent ? { bonusEvent } : {}),
   });
   return "passed" as const;
 }
@@ -213,9 +346,22 @@ export const createRoom = mutation({
     mode: modeValidator,
     matchType: v.optional(matchTypeValidator),
     targetScore: v.optional(targetScoreValidator),
+    avatar: v.optional(v.string()),
+    cpuLevel: v.optional(cpuLevelValidator),
   },
-  handler: async (ctx, { sessionId, playerName, mode, matchType = "1v1", targetScore = DEFAULT_TARGET_SCORE }) => {
+  handler: async (
+    ctx,
+    { sessionId, playerName, mode, matchType = "1v1", targetScore = DEFAULT_TARGET_SCORE, avatar, cpuLevel = "normal" },
+  ) => {
     assertSessionId(sessionId);
+    const recent = await ctx.db
+      .query("rooms")
+      .withIndex("by_host", (q) => q.eq("hostSessionId", sessionId))
+      .order("desc")
+      .take(ROOMS_PER_MINUTE);
+    if (recent.length === ROOMS_PER_MINUTE && Date.now() - recent[recent.length - 1]._creationTime < 60_000) {
+      throw new Error("Too many new rooms. Wait a minute and try again");
+    }
     let code = generateRoomCode();
     for (let attempt = 0; attempt < 10; attempt++) {
       const clash = await ctx.db
@@ -239,7 +385,27 @@ export const createRoom = mutation({
       boneyard: [],
       round: 0,
       consecutivePasses: 0,
+      turnSeconds: 0,
+      bonuses: false,
+      cpuLevel,
     });
+    if (matchType === "watch") {
+      // Four CPU players; the creator only watches. The match starts at once.
+      for (let i = 0; i < 4; i++) {
+        await ctx.db.insert("players", {
+          roomId,
+          sessionId: `cpu:${roomId}:${i}`,
+          name: WATCH_BOTS[i].name,
+          seatIndex: i,
+          hand: [],
+          score: 0,
+          isBot: true,
+          avatar: WATCH_BOTS[i].avatar,
+        });
+      }
+      await beginRound(ctx, roomId);
+      return { roomId, code };
+    }
     await ctx.db.insert("players", {
       roomId,
       sessionId,
@@ -248,6 +414,7 @@ export const createRoom = mutation({
       hand: [],
       score: 0,
       lastSeen: Date.now(),
+      avatar: cleanAvatar(avatar),
     });
     if (matchType === "cpu") {
       await ctx.db.insert("players", {
@@ -258,6 +425,7 @@ export const createRoom = mutation({
         hand: [],
         score: 0,
         isBot: true,
+        avatar: "🤖",
       });
     }
     return { roomId, code };
@@ -265,8 +433,8 @@ export const createRoom = mutation({
 });
 
 export const joinRoom = mutation({
-  args: { code: v.string(), sessionId: v.string(), playerName: v.string() },
-  handler: async (ctx, { code, sessionId, playerName }) => {
+  args: { code: v.string(), sessionId: v.string(), playerName: v.string(), avatar: v.optional(v.string()) },
+  handler: async (ctx, { code, sessionId, playerName, avatar }) => {
     assertSessionId(sessionId);
     const room = await ctx.db
       .query("rooms")
@@ -277,12 +445,17 @@ export const joinRoom = mutation({
     const existing = await getPlayer(ctx, room._id, sessionId);
     if (existing) {
       // Re-joining (e.g. after a refresh) just refreshes name and presence.
-      await ctx.db.patch(existing._id, { name: cleanName(playerName), lastSeen: Date.now() });
+      await ctx.db.patch(existing._id, {
+        name: cleanName(playerName),
+        lastSeen: Date.now(),
+        ...(cleanAvatar(avatar) ? { avatar: cleanAvatar(avatar) } : {}),
+      });
       return { roomId: room._id, code: room.code, seatIndex: existing.seatIndex };
     }
 
-    if (room.status !== "waiting") throw new Error("This game has already started");
     if (room.matchType === "cpu") throw new Error("This is a private game against the CPU");
+    if (room.matchType === "watch") throw new Error("This match is only for watching");
+    if (room.status !== "waiting") throw new Error("This game has already started");
     const players = await getPlayers(ctx, room._id);
     if (players.length >= seatsFor(room.matchType)) throw new Error("This room is full");
 
@@ -298,6 +471,7 @@ export const joinRoom = mutation({
       hand: [],
       score: 0,
       lastSeen: Date.now(),
+      avatar: cleanAvatar(avatar),
     });
     return { roomId: room._id, code: room.code, seatIndex };
   },
@@ -312,10 +486,11 @@ export const leaveRoom = mutation({
     if (room.status === "playing") throw new Error("You can't leave mid-round");
 
     await ctx.db.delete(me._id);
+    const ping = await presenceRow(ctx, roomId, sessionId);
+    if (ping) await ctx.db.delete(ping._id);
     const remaining = (await getPlayers(ctx, roomId)).filter((p) => !p.isBot);
     if (remaining.length === 0) {
-      for (const p of await getPlayers(ctx, roomId)) await ctx.db.delete(p._id);
-      await ctx.db.delete(roomId);
+      await deleteRoom(ctx, roomId);
       return;
     }
     if (room.hostSessionId === sessionId) {
@@ -348,7 +523,86 @@ export const setTargetScore = mutation({
     const room = await getRoomOrThrow(ctx, roomId);
     if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the target");
     if (room.status === "playing") throw new Error("Change the target between rounds");
-    await ctx.db.patch(roomId, { targetScore });
+    if ((room.targetScore ?? DEFAULT_TARGET_SCORE) === targetScore) return;
+    await ctx.db.patch(roomId, { targetScore, ...withRuleChange(room, [{ key: "target", value: String(targetScore), from: String(room.targetScore ?? DEFAULT_TARGET_SCORE) }]) });
+  },
+});
+
+/** Host changes the house rules. Not allowed mid-round. */
+export const setRoomOptions = mutation({
+  args: {
+    roomId: v.id("rooms"),
+    sessionId: v.string(),
+    turnSeconds: v.optional(turnSecondsValidator),
+    bonuses: v.optional(v.boolean()),
+    cpuLevel: v.optional(cpuLevelValidator),
+  },
+  handler: async (ctx, { roomId, sessionId, turnSeconds, bonuses, cpuLevel }) => {
+    const room = await getRoomOrThrow(ctx, roomId);
+    if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the rules");
+    if (room.status === "playing") throw new Error("Change the rules between rounds");
+    const changes: RuleChange[] = [];
+    if (turnSeconds !== undefined && turnSeconds !== (room.turnSeconds ?? 0)) changes.push({ key: "timer", value: String(turnSeconds), from: String(room.turnSeconds ?? 0) });
+    if (bonuses !== undefined && bonuses !== !!room.bonuses) changes.push({ key: "bonuses", value: bonuses ? "on" : "off", from: room.bonuses ? "on" : "off" });
+    if (cpuLevel !== undefined && cpuLevel !== (room.cpuLevel ?? "normal")) changes.push({ key: "cpu", value: cpuLevel, from: room.cpuLevel ?? "normal" });
+    await ctx.db.patch(roomId, {
+      ...(turnSeconds !== undefined ? { turnSeconds } : {}),
+      ...(bonuses !== undefined ? { bonuses } : {}),
+      ...(cpuLevel !== undefined ? { cpuLevel } : {}),
+      ...withRuleChange(room, changes),
+    });
+  },
+});
+
+/** A one-tap reaction shown over the sender's seat. Only the fixed list is accepted. */
+export const sendReaction = mutation({
+  args: { roomId: v.id("rooms"), sessionId: v.string(), reaction: v.string() },
+  handler: async (ctx, { roomId, sessionId, reaction }) => {
+    if (!(REACTIONS as readonly string[]).includes(reaction)) throw new Error("Unknown reaction");
+    const me = await getPlayer(ctx, roomId, sessionId);
+    if (!me) throw new Error("You are not seated in this room");
+    const now = Date.now();
+    if (reaction === HURRY_REACTION) {
+      const room = await getRoomOrThrow(ctx, roomId);
+      if (room.status !== "playing" || room.currentTurnSeat === me.seatIndex) {
+        throw new Error("That one is for when someone else is playing");
+      }
+    }
+    if (me.reaction && now - me.reaction.at < REACTION_COOLDOWN_MS) return;
+    await ctx.db.patch(me._id, {
+      reaction: { text: reaction, at: now },
+      lastSeen: now,
+      ...(reaction === DRINK_REACTION ? { drink: true } : reaction === NO_DRINK_REACTION ? { drink: false } : {}),
+    });
+  },
+});
+
+export const setAvatar = mutation({
+  args: { roomId: v.id("rooms"), sessionId: v.string(), avatar: v.string() },
+  handler: async (ctx, { roomId, sessionId, avatar }) => {
+    const me = await getPlayer(ctx, roomId, sessionId);
+    const clean = cleanAvatar(avatar);
+    if (me && clean) await ctx.db.patch(me._id, { avatar: clean });
+  },
+});
+
+/**
+ * Called when a player's table has just finished loading on their turn. The
+ * turn clock restarts once for that turn, so loading time is not held against them.
+ */
+export const tableReady = mutation({
+  args: { roomId: v.id("rooms"), sessionId: v.string() },
+  handler: async (ctx, { roomId, sessionId }) => {
+    const room = await getRoomOrThrow(ctx, roomId);
+    const me = await getPlayer(ctx, roomId, sessionId);
+    if (!me) return;
+    const now = Date.now();
+    await ctx.db.patch(me._id, { lastSeen: now });
+    const turnId = room.turnId ?? 0;
+    const seconds = room.turnSeconds ?? 0;
+    if (room.status !== "playing" || room.currentTurnSeat !== me.seatIndex || seconds === 0) return;
+    if (room.graceTurnId === turnId || room.turnDeadline === undefined) return;
+    await ctx.db.patch(roomId, { graceTurnId: turnId, turnDeadline: now + seconds * 1000 });
   },
 });
 
@@ -356,8 +610,42 @@ export const setTargetScore = mutation({
 export const heartbeat = mutation({
   args: { roomId: v.id("rooms"), sessionId: v.string() },
   handler: async (ctx, { roomId, sessionId }) => {
+    const room = await ctx.db.get(roomId);
+    if (!room) return;
+    // Seated players, and the viewer who set up a watched match.
     const me = await getPlayer(ctx, roomId, sessionId);
-    if (me) await ctx.db.patch(me._id, { lastSeen: Date.now() });
+    if (!me && room.hostSessionId !== sessionId) return;
+    const row = await presenceRow(ctx, roomId, sessionId);
+    const now = Date.now();
+    // A watched match that stopped for want of a viewer deals again when they return.
+    const wasGone = !row || now - row.lastSeen > WATCH_IDLE_MS;
+    if (room.matchType === "watch" && room.status === "finished" && !room.matchOver && wasGone && room.round !== undefined) {
+      await ctx.scheduler.runAfter(WATCH_NEXT_ROUND_MS, internal.games.autoNextRound, { roomId, round: room.round });
+    }
+    if (row) await ctx.db.patch(row._id, { lastSeen: now });
+    else await ctx.db.insert("presence", { roomId, sessionId, lastSeen: now });
+  },
+});
+
+/**
+ * When each seat was last heard from, with the server's clock to measure
+ * against. Small and separate from the game state, so pings stay cheap.
+ */
+export const getPresence = query({
+  args: { roomId: v.id("rooms") },
+  handler: async (ctx, { roomId }) => {
+    const players = await getPlayers(ctx, roomId);
+    const rows = await ctx.db
+      .query("presence")
+      .withIndex("by_room", (q) => q.eq("roomId", roomId))
+      .collect();
+    return {
+      now: Date.now(),
+      seats: players.map((p) => ({
+        seatIndex: p.seatIndex,
+        lastSeen: Math.max(p.lastSeen ?? 0, rows.find((r) => r.sessionId === p.sessionId)?.lastSeen ?? 0),
+      })),
+    };
   },
 });
 
@@ -365,44 +653,82 @@ export const heartbeat = mutation({
 // Game flow
 // ---------------------------------------------------------------------------
 
+/** Deals and starts a round (or a fresh match when the last one is over). */
+async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
+  const room = await getRoomOrThrow(ctx, roomId);
+  const players = await getPlayers(ctx, roomId);
+  const needed = seatsFor(room.matchType);
+  if (players.length !== needed) {
+    throw new Error(`This match needs ${needed} players (${players.length} seated)`);
+  }
+
+  // A finished match starts over: scores back to zero, round 1.
+  const newMatch = !!room.matchOver;
+  const { hands, boneyard } = deal(players.length);
+  // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
+  // In 2v2 the lobby already fills seats 0-3, so partners stay across.
+  for (let i = 0; i < players.length; i++) {
+    await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
+  }
+
+  // The winner of the last round opens the next one. A new match, or a round
+  // nobody won (a tied block), is opened by whoever holds the highest double.
+  const lastWinner = newMatch ? -1 : players.findIndex((p) => p.sessionId === room.winnerSessionId);
+  const starter = lastWinner >= 0 ? lastWinner : findStartingPlayer(hands);
+
+  await ctx.db.patch(roomId, {
+    status: "playing",
+    currentTurnSeat: starter,
+    openEnds: { left: null, right: null },
+    board: [],
+    boneyard,
+    winnerSessionId: undefined,
+    winReason: undefined,
+    round: newMatch ? 1 : (room.round ?? 0) + 1,
+    consecutivePasses: 0,
+    lastAction: undefined,
+    matchOver: false,
+    matchWinnerTeam: undefined,
+    turnId: (room.turnId ?? 0) + 1,
+    turnDeadline: undefined,
+    voids: players.map(() => []),
+    bonusEvent: undefined,
+    // Remind everyone of changed rules as the round they apply to is dealt.
+    ...(room.rulesChange && !room.rulesChange.applied
+      ? { rulesChange: { ...room.rulesChange, at: Date.now(), applied: true } }
+      : {}),
+  });
+  await scheduleNext(ctx, roomId);
+}
+
 /** Starts the first round, or the next round once a round has finished. */
 export const startGame = mutation({
   args: { roomId: v.id("rooms"), sessionId: v.string() },
   handler: async (ctx, { roomId, sessionId }) => {
     const room = await getRoomOrThrow(ctx, roomId);
-    if (room.hostSessionId !== sessionId) throw new Error("Only the host can start the game");
     if (room.status === "playing") throw new Error("The game is already in progress");
-
     const players = await getPlayers(ctx, roomId);
-    const needed = seatsFor(room.matchType);
-    if (players.length !== needed) {
-      throw new Error(`This match needs ${needed} players (${players.length} seated)`);
+    if (room.hostSessionId !== sessionId) {
+      // Anyone seated may deal the next round when the host has gone away.
+      const host = players.find((p) => p.sessionId === room.hostSessionId);
+      const hostAway = !host || Date.now() - (await lastSeenOf(ctx, host)) > AWAY_MS;
+      const seated = players.some((p) => p.sessionId === sessionId);
+      if (!(room.status === "finished" && hostAway && seated)) throw new Error("Only the host can start the game");
     }
+    await beginRound(ctx, roomId);
+  },
+});
 
-    // A finished match starts over: scores back to zero, round 1.
-    const newMatch = !!room.matchOver;
-    const { hands, boneyard } = deal(players.length);
-    // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
-    // In 2v2 the lobby already fills seats 0-3, so partners stay across.
-    for (let i = 0; i < players.length; i++) {
-      await ctx.db.patch(players[i]._id, { seatIndex: i, hand: hands[i], ...(newMatch ? { score: 0 } : {}) });
-    }
-
-    await ctx.db.patch(roomId, {
-      status: "playing",
-      currentTurnSeat: findStartingPlayer(hands),
-      openEnds: { left: null, right: null },
-      board: [],
-      boneyard,
-      winnerSessionId: undefined,
-      winReason: undefined,
-      round: newMatch ? 1 : (room.round ?? 0) + 1,
-      consecutivePasses: 0,
-      lastAction: undefined,
-      matchOver: false,
-      matchWinnerTeam: undefined,
-    });
-    await scheduleCpuIfNeeded(ctx, roomId);
+/** Watched CPU matches deal their own next round after a short pause. */
+export const autoNextRound = internalMutation({
+  args: { roomId: v.id("rooms"), round: v.number() },
+  handler: async (ctx, { roomId, round }) => {
+    const room = await ctx.db.get(roomId);
+    if (!room || room.status !== "finished" || room.matchOver || (room.round ?? 0) !== round) return;
+    // Nobody watching: stop here rather than play the match out for no one.
+    const viewer = await presenceRow(ctx, roomId, room.hostSessionId);
+    if (Date.now() - (viewer?.lastSeen ?? room._creationTime) > WATCH_IDLE_MS) return;
+    await beginRound(ctx, roomId);
   },
 });
 
@@ -416,7 +742,7 @@ export const playTile = mutation({
   handler: async (ctx, { roomId, sessionId, tileId, targetSide }) => {
     const { room, players, me } = await requireTurn(ctx, roomId, sessionId);
     const result = await applyPlay(ctx, room, players, me, tileId, targetSide);
-    await scheduleCpuIfNeeded(ctx, roomId);
+    await scheduleNext(ctx, roomId);
     return { result };
   },
 });
@@ -431,7 +757,7 @@ export const drawOrPass = mutation({
   handler: async (ctx, { roomId, sessionId }) => {
     const { room, players, me } = await requireTurn(ctx, roomId, sessionId);
     const result = await applyDrawOrPass(ctx, room, players, me);
-    await scheduleCpuIfNeeded(ctx, roomId);
+    await scheduleNext(ctx, roomId);
     return { result };
   },
 });
@@ -456,11 +782,61 @@ export const cpuTurn = internalMutation({
     const move =
       room.board.length === 0
         ? { tileId: chooseOpeningTile(me.hand).id, side: "root" as const }
-        : chooseCpuMove(me.hand, room.board, room.openEnds);
+        : chooseCpuMoveForLevel(room.cpuLevel ?? "normal", me.hand, room.board, room.openEnds, opponentVoids(room, players, me));
 
     if (move) await applyPlay(ctx, room, players, me, move.tileId, move.side);
     else await applyDrawOrPass(ctx, room, players, me);
-    await scheduleCpuIfNeeded(ctx, roomId);
+    await scheduleNext(ctx, roomId);
+  },
+});
+
+/** Numbers the players on the other side have failed to match this round. */
+function opponentVoids(room: Doc<"rooms">, players: Doc<"players">[], me: Doc<"players">): number[] {
+  const teams = teamsOf(room, players);
+  return players.flatMap((p, i) => (teams[i] === teams[players.indexOf(me)] ? [] : (room.voids?.[p.seatIndex] ?? [])));
+}
+
+/**
+ * Clock for a human turn. Plays the turn for them when their time is up or
+ * they have dropped off; otherwise looks again a little later.
+ */
+export const turnTick = internalMutation({
+  args: { roomId: v.id("rooms"), turnId: v.number() },
+  handler: async (ctx, { roomId, turnId }) => {
+    let room = await ctx.db.get(roomId);
+    if (!room || room.status !== "playing" || (room.turnId ?? 0) !== turnId) return;
+    let players = await getPlayers(ctx, roomId);
+    const seat = room.currentTurnSeat;
+    let me = players.find((p) => p.seatIndex === seat);
+    if (!me || me.isBot) return;
+
+    const now = Date.now();
+    const timedOut = room.turnDeadline !== undefined && now >= room.turnDeadline;
+    const away = room.matchType !== "cpu" && now - (await lastSeenOf(ctx, me)) > AWAY_MS;
+    if (!timedOut && !away) {
+      const wait = Math.min(room.turnDeadline !== undefined ? room.turnDeadline - now : Infinity, AWAY_CHECK_MS);
+      await ctx.scheduler.runAfter(Math.max(wait, 250), internal.games.turnTick, { roomId, turnId });
+      return;
+    }
+
+    // Play one whole turn: draw until something fits, then play it (or pass).
+    for (let step = 0; step < 30; step++) {
+      const lastSeen = me.lastSeen;
+      const move =
+        room.board.length === 0
+          ? { tileId: chooseOpeningTile(me.hand).id, side: "root" as const }
+          : chooseCpuMove(me.hand, room.board, room.openEnds);
+      const result = move
+        ? await applyPlay(ctx, room, players, me, move.tileId, move.side, true)
+        : await applyDrawOrPass(ctx, room, players, me, true);
+      // The stand-in must not make an absent player look present.
+      await ctx.db.patch(me._id, { lastSeen });
+      if (result !== "drew") break;
+      room = (await ctx.db.get(roomId))!;
+      players = await getPlayers(ctx, roomId);
+      me = players.find((p) => p.seatIndex === seat)!;
+    }
+    await scheduleNext(ctx, roomId);
   },
 });
 
@@ -496,11 +872,9 @@ export const getGameState = query({
     if (!room) return null;
     const players = await getPlayers(ctx, roomId);
     const me = players.find((p) => p.sessionId === sessionId) ?? null;
-    const now = Date.now();
-    const isConnected = (p: Doc<"players">) => !!p.isBot || now - (p.lastSeen ?? 0) < CONNECTED_WINDOW_MS;
     const seatOf = (sid: string | undefined) =>
       sid === undefined ? null : (players.find((p) => p.sessionId === sid)?.seatIndex ?? null);
-    const teamOf = (seat: number) => (room.matchType === "2v2" ? seat % 2 : seat);
+    const teamOf = (seat: number) => (isTeamMatch(room.matchType) ? seat % 2 : seat);
     const finished = room.status === "finished";
 
     const hand = me?.hand ?? [];
@@ -531,7 +905,19 @@ export const getGameState = query({
         winnerSeat: seatOf(room.winnerSessionId),
         winReason: room.winReason ?? null,
         lastAction: room.lastAction ?? null,
+        turnSeconds: room.turnSeconds ?? 0,
+        turnDeadline: room.status === "playing" ? (room.turnDeadline ?? null) : null,
+        bonuses: !!room.bonuses,
+        cpuLevel: room.cpuLevel ?? "normal",
+        lastRound: finished ? (room.lastRound ?? null) : null,
+        bonusEvent: room.bonusEvent ?? null,
+        rulesChange: room.rulesChange ?? null,
       },
+      // A watched CPU match has no seat for the viewer; they see the south hand instead.
+      spectator:
+        !me && room.matchType === "watch"
+          ? { isHost: room.hostSessionId === sessionId, hand: players[0]?.hand ?? [], seatIndex: 0 }
+          : null,
       me: me
         ? {
             id: me._id,
@@ -541,6 +927,13 @@ export const getGameState = query({
             score: me.score,
             hand,
             isHost: room.hostSessionId === sessionId,
+            // The host deals; anyone seated may once the host has gone away
+            // (the client checks that against getPresence, the server on the call).
+            canStart: room.hostSessionId === sessionId,
+            canStartIfHostAway: finished,
+            avatar: me.avatar ?? null,
+            reaction: me.reaction ?? null,
+            drink: !!me.drink,
             isMyTurn,
             playable,
             canDrawOrPass: isMyTurn && room.board.length > 0 && playable.length === 0,
@@ -556,13 +949,39 @@ export const getGameState = query({
           seatIndex: p.seatIndex,
           tileCount: p.hand.length,
           score: p.score,
-          isConnected: isConnected(p),
           // Extras (no hidden info): team, bot flag, and a pip *total* only
           // once the round is over (to explain blocked results).
           team: teamOf(p.seatIndex),
           isBot: !!p.isBot,
+          avatar: p.avatar ?? null,
+          reaction: p.reaction ?? null,
+          drink: !!p.drink,
           finalPips: finished ? pipTotal(p.hand) : null,
         })),
     };
+  },
+});
+
+/** Removes rooms that nobody has played in or looked at for a day. Run hourly. */
+export const cleanupRooms = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - ROOM_IDLE_MS;
+    // Oldest first: anything stale is at the front.
+    const rooms = await ctx.db.query("rooms").order("asc").take(200);
+    let removed = 0;
+    for (const room of rooms) {
+      if (room._creationTime > cutoff) break;
+      const players = await getPlayers(ctx, room._id);
+      const pings = await ctx.db
+        .query("presence")
+        .withIndex("by_room", (q) => q.eq("roomId", room._id))
+        .collect();
+      const lastActive = Math.max(room._creationTime, ...players.map((p) => p.lastSeen ?? 0), ...pings.map((r) => r.lastSeen));
+      if (lastActive > cutoff) continue;
+      await deleteRoom(ctx, room._id);
+      removed++;
+    }
+    return removed;
   },
 });
