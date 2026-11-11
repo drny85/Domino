@@ -119,10 +119,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           b: t.b,
           playable,
           selected: t.id === selectedTileId,
-          dim: !!me?.isMyTurn && !playable && room.board.length > 0,
+          dim: !!me?.isMyTurn && !playable,
         };
       }),
-    [hand, me?.isMyTurn, playableMap, selectedTileId, room.board.length],
+    [hand, me?.isMyTurn, playableMap, selectedTileId],
   );
   // Stable callback for the 3D rack; always acts on the latest hand.
   const tapRef = useRef<(id: string) => void>(() => {});
@@ -167,6 +167,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     }
     const sides = playableMap.get(tile.id);
     if (!sides) {
+      if (me.mustOpenWith) {
+        showToast(t("Open the match with the {tile}", { tile: me.mustOpenWith }));
+        return;
+      }
       showToast(t("{tile} doesn't match {left} or {right}", { tile: `${tile.a}-${tile.b}`, left: room.openEnds.left ?? "", right: room.openEnds.right ?? "" }));
       return;
     }
@@ -342,7 +346,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       ? t("Round over")
       : me?.isMyTurn
         ? room.board.length === 0
-          ? t("Your lead: play any tile")
+          ? me.mustOpenWith
+            ? t("Open the match with the {tile}", { tile: me.mustOpenWith })
+            : t("Your lead: play any tile")
           : me.canDrawOrPass
             ? me.willDraw
               ? t("No match: draw a tile")

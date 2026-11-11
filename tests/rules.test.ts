@@ -133,8 +133,20 @@ describe("blocked games and scoring", () => {
     expect(blockedWinner([[t(5, 5)], [t(0, 1)], [t(3, 3)]])).toBe(1);
     expect(blockedWinner([[t(0, 2)], [t(1, 1)]])).toBeNull();
   });
-  it("winner scores everyone else's pips", () => {
-    expect(roundPoints([[], [t(1, 2)], [t(6, 6)]], 0)).toBe(15);
+  it("winner scores every pip left on the table, own and partner's included", () => {
+    expect(roundPoints([[], [t(1, 2)], [t(6, 6)]])).toBe(15);
+    // Blocked 2v2: winner (seat 0) still holds 1 pip, partner (seat 2) holds 4.
+    expect(roundPoints([[t(0, 1)], [t(5, 5)], [t(2, 2)], [t(6, 3)]])).toBe(1 + 10 + 4 + 9);
+  });
+  it("a match opens with the highest double, or the heaviest tile when nobody has a double", async () => {
+    const { findOpening, chooseOpeningTile } = await import("../convex/lib/rules");
+    expect(findOpening([[t(1, 1), t(5, 6)], [t(4, 4)], [t(2, 2)]])).toEqual({ seat: 1, tileId: "4-4" });
+    expect(findOpening([[t(1, 2), t(3, 4)], [t(5, 6)], [t(0, 6)]])).toEqual({ seat: 1, tileId: "5-6" });
+    expect(validSides(t(5, 6), [], { left: null, right: null }, "4-4")).toEqual([]);
+    expect(validSides(t(4, 4), [], { left: null, right: null }, "4-4")).toEqual(["root"]);
+    expect(validSides(t(5, 6), [], { left: null, right: null })).toEqual(["root"]);
+    expect(chooseOpeningTile([t(6, 6), t(4, 4)], "4-4").id).toBe("4-4");
+    expect(chooseOpeningTile([t(6, 6), t(4, 4)]).id).toBe("6-6");
   });
 });
 

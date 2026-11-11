@@ -28,6 +28,8 @@ export default defineSchema({
     openEnds: v.object({ left: v.nullable(v.number()), right: v.nullable(v.number()) }),
     board: v.array(boardTileValidator),
     boneyard: v.array(tileValidator),
+    // First play of a match: the opener must lead with this tile (highest double).
+    openingTileId: v.optional(v.string()),
     winnerSessionId: v.optional(v.string()),
     winReason: v.optional(v.string()),
     // Additions beyond the base spec:

@@ -56,7 +56,7 @@ describe("soak: whole matches with every option", () => {
           await t.mutation(api.games.heartbeat, { roomId, sessionId: S(1) });
           if (!mine.isMyTurn) continue; // a stand-in or the timer got there first
           if (state.room.board.length === 0) {
-            await t.mutation(api.games.playTile, { roomId, sessionId: S(seat), tileId: mine.hand[0].id, targetSide: "root" });
+            await t.mutation(api.games.playTile, { roomId, sessionId: S(seat), tileId: mine.playable[0].tileId, targetSide: "root" });
           } else if (mine.playable.length) {
             const p = mine.playable[step % mine.playable.length];
             await t.mutation(api.games.playTile, { roomId, sessionId: S(seat), tileId: p.tileId, targetSide: p.sides[step % p.sides.length] });
@@ -106,7 +106,7 @@ describe("soak: whole matches with every option", () => {
           break;
         }
         expect(s.me!.isMyTurn).toBe(true);
-        if (s.room.board.length === 0) await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: s.me!.hand[0].id, targetSide: "root" });
+        if (s.room.board.length === 0) await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: s.me!.playable[0].tileId, targetSide: "root" });
         else if (s.me!.playable.length) await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: s.me!.playable[0].tileId, targetSide: s.me!.playable[0].sides[0] });
         else await t.mutation(api.games.drawOrPass, { roomId, sessionId: S(0) });
       }

@@ -16,7 +16,7 @@ import {
   isCapicua,
   chooseOpeningTile,
   deal,
-  findStartingPlayer,
+  findOpening,
   generateRoomCode,
   hasPlayableTile,
   isTeamMatch,
@@ -168,7 +168,7 @@ async function finishRound(
   let points = 0;
   if (winnerIdx !== null) {
     const winner = players[winnerIdx];
-    points = roundPoints(hands, winnerIdx, teams) + (bonus?.points ?? 0);
+    points = roundPoints(hands) + (bonus?.points ?? 0);
     scores[winnerIdx] += points;
     await ctx.db.patch(winner._id, { score: scores[winnerIdx] });
   }
@@ -254,7 +254,8 @@ async function applyPlay(
 ) {
   const tile = me.hand.find((t) => t.id === tileId);
   if (!tile) throw new Error("That tile is not in your hand");
-  if (!validSides(tile, room.board, room.openEnds).includes(targetSide)) {
+  if (!validSides(tile, room.board, room.openEnds, room.openingTileId).includes(targetSide)) {
+    if (room.board.length === 0 && room.openingTileId) throw new Error("Open the match with your highest double");
     throw new Error("That tile can't be played there");
   }
 
@@ -673,8 +674,12 @@ async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
 
   // The winner of the last round opens the next one. A new match, or a round
   // nobody won (a tied block), is opened by whoever holds the highest double.
+  // The first play of a match must be that highest double itself; in later
+  // rounds the opener leads with any tile.
+  const firstRound = newMatch || !room.round;
   const lastWinner = newMatch ? -1 : players.findIndex((p) => p.sessionId === room.winnerSessionId);
-  const starter = lastWinner >= 0 ? lastWinner : findStartingPlayer(hands);
+  const opening = findOpening(hands);
+  const starter = lastWinner >= 0 ? lastWinner : opening.seat;
 
   await ctx.db.patch(roomId, {
     status: "playing",
@@ -682,6 +687,7 @@ async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
     openEnds: { left: null, right: null },
     board: [],
     boneyard,
+    openingTileId: firstRound ? opening.tileId : undefined,
     winnerSessionId: undefined,
     winReason: undefined,
     round: newMatch ? 1 : (room.round ?? 0) + 1,
@@ -781,7 +787,7 @@ export const cpuTurn = internalMutation({
 
     const move =
       room.board.length === 0
-        ? { tileId: chooseOpeningTile(me.hand).id, side: "root" as const }
+        ? { tileId: chooseOpeningTile(me.hand, room.openingTileId).id, side: "root" as const }
         : chooseCpuMoveForLevel(room.cpuLevel ?? "normal", me.hand, room.board, room.openEnds, opponentVoids(room, players, me));
 
     if (move) await applyPlay(ctx, room, players, me, move.tileId, move.side);
@@ -824,7 +830,7 @@ export const turnTick = internalMutation({
       const lastSeen = me.lastSeen;
       const move =
         room.board.length === 0
-          ? { tileId: chooseOpeningTile(me.hand).id, side: "root" as const }
+          ? { tileId: chooseOpeningTile(me.hand, room.openingTileId).id, side: "root" as const }
           : chooseCpuMove(me.hand, room.board, room.openEnds);
       const result = move
         ? await applyPlay(ctx, room, players, me, move.tileId, move.side, true)
@@ -881,7 +887,7 @@ export const getGameState = query({
     const isMyTurn = !!me && room.status === "playing" && room.currentTurnSeat === me.seatIndex;
     const playable = isMyTurn
       ? hand
-          .map((t) => ({ tileId: t.id, sides: validSides(t, room.board, room.openEnds) }))
+          .map((t) => ({ tileId: t.id, sides: validSides(t, room.board, room.openEnds, room.openingTileId) }))
           .filter((p) => p.sides.length > 0)
       : [];
 
@@ -937,6 +943,8 @@ export const getGameState = query({
             isMyTurn,
             playable,
             canDrawOrPass: isMyTurn && room.board.length > 0 && playable.length === 0,
+            // First play of a match: the tile the opener has to lead with.
+            mustOpenWith: isMyTurn && room.board.length === 0 && room.openingTileId ? room.openingTileId : null,
             willDraw: room.mode === "draw" && room.boneyard.length > 0,
             finalPips: finished ? pipTotal(hand) : null,
           }
