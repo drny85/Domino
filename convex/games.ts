@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { cpuLevelValidator, matchTypeValidator, modeValidator, targetScoreValidator, turnSecondsValidator } from "./schema";
+import { bonusPointsValidator, cpuLevelValidator, matchTypeValidator, modeValidator, targetScoreValidator, turnSecondsValidator } from "./schema";
 import {
   AVATARS,
   BONUS_POINTS,
@@ -151,6 +151,9 @@ async function requireTurn(ctx: MutationCtx, roomId: Id<"rooms">, sessionId: str
   return { room, players, me };
 }
 
+/** Points each bonus is worth in this room (the host picks 25 or 30). */
+const bonusValue = (room: Doc<"rooms">) => room.bonusPoints ?? BONUS_POINTS;
+
 const teamsOf = (room: Doc<"rooms">, players: Doc<"players">[]) => teamsFor(room.matchType, players.length);
 
 /** Ends the round, awards points and records the winner. */
@@ -270,7 +273,7 @@ async function applyPlay(
 
   if (hand.length === 0) {
     const capicua = !!room.bonuses && room.board.length > 0 && isCapicua(tile, room.openEnds);
-    await finishRound(ctx, updatedRoom, updatedPlayers, me.seatIndex, "domino", capicua ? { points: BONUS_POINTS, kind: "capicua" } : null);
+    await finishRound(ctx, updatedRoom, updatedPlayers, me.seatIndex, "domino", capicua ? { points: bonusValue(room), kind: "capicua" } : null);
     return "won" as const;
   }
   if (await endIfBlocked(ctx, updatedRoom, updatedPlayers, room.boneyard.length)) return "blocked" as const;
@@ -300,7 +303,23 @@ async function applyDrawOrPass(
   }
   const flag = auto ? { auto } : {};
 
-  if (room.mode === "draw" && room.boneyard.length > 0) {
+  // Pase de salida: the player after the opener cannot answer the round's
+  // first tile (only the opener has played), so the opener's side scores the
+  // bonus, once per round. Only a real pass counts: drawing from the boneyard
+  // does not (the usual Dominican rule).
+  let salida: Doc<"rooms">["bonusEvent"] = undefined;
+  const willDraw = room.mode === "draw" && room.boneyard.length > 0;
+  if (room.bonuses && room.board.length === 1 && room.bonusEvent?.kind !== "salida" && !willDraw) {
+    const openerSeat = (me.seatIndex - 1 + players.length) % players.length;
+    const opener = players.find((p) => p.seatIndex === openerSeat);
+    if (opener) {
+      const points = bonusValue(room);
+      await ctx.db.patch(opener._id, { score: opener.score + points });
+      salida = { seatIndex: openerSeat, kind: "salida", points, at: Date.now() };
+    }
+  }
+
+  if (willDraw) {
     const boneyard = [...room.boneyard];
     const drawn = boneyard.pop()!;
     await ctx.db.patch(me._id, { hand: [...me.hand, drawn], lastSeen: Date.now() });
@@ -312,17 +331,21 @@ async function applyDrawOrPass(
     return "drew" as const;
   }
 
-  if (await endIfBlocked(ctx, room, players, room.boneyard.length)) return "blocked" as const;
+  if (salida) await ctx.db.patch(room._id, { bonusEvent: salida });
+  // Round-end scoring must see the bonus just paid.
+  const scored = salida ? players.map((p) => (p.seatIndex === salida.seatIndex ? { ...p, score: p.score + salida.points } : p)) : players;
+  if (await endIfBlocked(ctx, room, scored, room.boneyard.length)) return "blocked" as const;
 
   const passes = (room.consecutivePasses ?? 0) + 1;
   const nextSeat = (room.currentTurnSeat + 1) % players.length;
   // Pase corrido (four players): the whole table passed on one player's tile.
-  let bonusEvent: Doc<"rooms">["bonusEvent"] = undefined;
+  let bonusEvent: Doc<"rooms">["bonusEvent"] = salida;
   if (room.bonuses && players.length === 4 && passes === 3) {
     const lucky = players.find((p) => p.seatIndex === nextSeat);
     if (lucky) {
-      await ctx.db.patch(lucky._id, { score: lucky.score + BONUS_POINTS });
-      bonusEvent = { seatIndex: nextSeat, kind: "pase", points: BONUS_POINTS, at: Date.now() };
+      const points = bonusValue(room);
+      await ctx.db.patch(lucky._id, { score: lucky.score + points });
+      bonusEvent = { seatIndex: nextSeat, kind: "pase", points, at: Date.now() };
     }
   }
   await ctx.db.patch(room._id, {
@@ -536,19 +559,22 @@ export const setRoomOptions = mutation({
     sessionId: v.string(),
     turnSeconds: v.optional(turnSecondsValidator),
     bonuses: v.optional(v.boolean()),
+    bonusPoints: v.optional(bonusPointsValidator),
     cpuLevel: v.optional(cpuLevelValidator),
   },
-  handler: async (ctx, { roomId, sessionId, turnSeconds, bonuses, cpuLevel }) => {
+  handler: async (ctx, { roomId, sessionId, turnSeconds, bonuses, bonusPoints, cpuLevel }) => {
     const room = await getRoomOrThrow(ctx, roomId);
     if (room.hostSessionId !== sessionId) throw new Error("Only the host can change the rules");
     if (room.status === "playing") throw new Error("Change the rules between rounds");
     const changes: RuleChange[] = [];
     if (turnSeconds !== undefined && turnSeconds !== (room.turnSeconds ?? 0)) changes.push({ key: "timer", value: String(turnSeconds), from: String(room.turnSeconds ?? 0) });
     if (bonuses !== undefined && bonuses !== !!room.bonuses) changes.push({ key: "bonuses", value: bonuses ? "on" : "off", from: room.bonuses ? "on" : "off" });
+    if (bonusPoints !== undefined && bonusPoints !== bonusValue(room)) changes.push({ key: "bonusPoints", value: String(bonusPoints), from: String(bonusValue(room)) });
     if (cpuLevel !== undefined && cpuLevel !== (room.cpuLevel ?? "normal")) changes.push({ key: "cpu", value: cpuLevel, from: room.cpuLevel ?? "normal" });
     await ctx.db.patch(roomId, {
       ...(turnSeconds !== undefined ? { turnSeconds } : {}),
       ...(bonuses !== undefined ? { bonuses } : {}),
+      ...(bonusPoints !== undefined ? { bonusPoints } : {}),
       ...(cpuLevel !== undefined ? { cpuLevel } : {}),
       ...withRuleChange(room, changes),
     });
@@ -914,6 +940,7 @@ export const getGameState = query({
         turnSeconds: room.turnSeconds ?? 0,
         turnDeadline: room.status === "playing" ? (room.turnDeadline ?? null) : null,
         bonuses: !!room.bonuses,
+        bonusPoints: bonusValue(room),
         cpuLevel: room.cpuLevel ?? "normal",
         lastRound: finished ? (room.lastRound ?? null) : null,
         bonusEvent: room.bonusEvent ?? null,

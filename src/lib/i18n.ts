@@ -94,8 +94,10 @@ export const ES: Record<string, string> = {
   Off: "No",
   On: "Sí",
   Bonuses: "Bonos",
-  "+25 capicúa, +25 when all three pass": "+25 por capicúa, +25 si los tres pasan",
-  "+25 for a capicúa": "+25 por capicúa",
+  "+{n} capicúa, +{n} when the next player can't answer the first tile, +{n} when all three pass":
+    "+{n} por capicúa, +{n} por pase de salida, +{n} si los tres pasan",
+  "+{n} capicúa, +{n} when the next player can't answer the first tile": "+{n} por capicúa, +{n} por pase de salida",
+  "Bonus value": "Valor del bono",
 
   // Table and background picker
   Table: "Mesa",
@@ -162,6 +164,8 @@ export const ES: Record<string, string> = {
   "{name} played {tile}": "{name} jugó el {tile}",
   "(played automatically)": "(jugada automática)",
   "Everyone passed! +{n} for you": "¡Pasaron todos! +{n} para ti",
+  "Pase de salida! +{n} for you": "¡Pase de salida! +{n} para ti",
+  "Pase de salida! +{n} for {name}": "¡Pase de salida! +{n} para {name}",
   "Everyone passed! +{n} for {name}": "¡Pasaron todos! +{n} para {name}",
   "{n} seconds left": "Quedan {n} segundos",
   Reactions: "Reacciones",

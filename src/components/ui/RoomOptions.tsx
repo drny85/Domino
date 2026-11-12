@@ -47,13 +47,13 @@ function Segmented<T extends string | number>({
   );
 }
 
-/** House rules: turn timer, bonuses and CPU level. The host edits; everyone else just sees them. */
+/** House rules: turn timer, bonuses (and their value) and CPU level. The host edits; everyone else just sees them. */
 export function RoomOptions({ state, sessionId, onError }: { state: GameState; sessionId: string; onError?: (msg: string) => void }) {
   const setOptions = useMutation(api.games.setRoomOptions);
   const t = useT();
   const { room, me } = state;
   const editable = (!!me?.isHost || !!state.spectator?.isHost) && room.status !== "playing";
-  const save = (patch: { turnSeconds?: 0 | 20 | 30; bonuses?: boolean; cpuLevel?: "easy" | "normal" | "hard" }) =>
+  const save = (patch: { turnSeconds?: 0 | 20 | 30; bonuses?: boolean; bonusPoints?: 25 | 30; cpuLevel?: "easy" | "normal" | "hard" }) =>
     setOptions({ roomId: room.id, sessionId, ...patch }).catch((e) => onError?.(errorMessage(e)));
   return (
     <div className="space-y-3">
@@ -71,7 +71,11 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
       />
       <Segmented
         label={t("Bonuses")}
-        hint={room.seats === 4 ? t("+25 capicúa, +25 when all three pass") : t("+25 for a capicúa")}
+        hint={
+          room.seats === 4
+            ? t("+{n} capicúa, +{n} when the next player can't answer the first tile, +{n} when all three pass", { n: room.bonusPoints })
+            : t("+{n} capicúa, +{n} when the next player can't answer the first tile", { n: room.bonusPoints })
+        }
         value={room.bonuses ? "on" : "off"}
         editable={editable}
         options={[
@@ -80,6 +84,18 @@ export function RoomOptions({ state, sessionId, onError }: { state: GameState; s
         ]}
         onPick={(v) => save({ bonuses: v === "on" })}
       />
+      {room.bonuses && (
+        <Segmented
+          label={t("Bonus value")}
+          value={room.bonusPoints as 25 | 30}
+          editable={editable}
+          options={[
+            { value: 25, text: "25" },
+            { value: 30, text: "30" },
+          ]}
+          onPick={(bonusPoints) => save({ bonusPoints })}
+        />
+      )}
       {(room.matchType === "cpu" || room.matchType === "watch") && (
         <Segmented
           label={t("CPU level")}

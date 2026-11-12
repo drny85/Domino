@@ -270,11 +270,17 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     if (!b || b.at === seenBonus.current) return;
     seenBonus.current = b.at;
     const who = seats.find((x) => x.seatIndex === b.seatIndex);
+    const name = who?.name ?? t("Someone");
     setBanner({
       id: b.at,
-      text: who?.isMe
-        ? t("Everyone passed! +{n} for you", { n: b.points })
-        : t("Everyone passed! +{n} for {name}", { n: b.points, name: who?.name ?? t("Someone") }),
+      text:
+        b.kind === "salida"
+          ? who?.isMe
+            ? t("Pase de salida! +{n} for you", { n: b.points })
+            : t("Pase de salida! +{n} for {name}", { n: b.points, name })
+          : who?.isMe
+            ? t("Everyone passed! +{n} for you", { n: b.points })
+            : t("Everyone passed! +{n} for {name}", { n: b.points, name }),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bonusAt]);
@@ -922,11 +928,13 @@ function describeRule(t: ReturnType<typeof useT>, c: RuleChange, sep: string) {
       ? v
       : c.key === "timer"
         ? v === "0" ? t("Off") : `${v}s`
+        : c.key === "bonusPoints"
+          ? `+${v}`
         : c.key === "bonuses"
           ? t(v === "on" ? "On" : "Off")
           : t(v === "easy" ? "Easy" : v === "hard" ? "Hard" : "Normal");
   const label = t(
-    c.key === "target" ? "Points to win" : c.key === "timer" ? "Turn timer" : c.key === "bonuses" ? "Bonuses" : "CPU level",
+    c.key === "target" ? "Points to win" : c.key === "timer" ? "Turn timer" : c.key === "bonuses" ? "Bonuses" : c.key === "bonusPoints" ? "Bonus value" : "CPU level",
   );
   return `${label}${sep}${c.from !== undefined ? `${val(c.from)} → ` : ""}${val(c.value)}`;
 }
