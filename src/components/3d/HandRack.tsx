@@ -4,7 +4,8 @@ import { animated, useSpring } from "@react-spring/three";
 import { type ThreeEvent, useThree } from "@react-three/fiber";
 import { memo, useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { TILE_LENGTH, TileBody } from "./DominoTile";
+import { RoundedBox } from "@react-three/drei";
+import { TILE_HEIGHT, TILE_LENGTH, TILE_WIDTH, TileBody } from "./DominoTile";
 import { IVORY, ivoryTint } from "./materials";
 import { RACK_LENGTH, RACK_Y, RACK_Z } from "./Table";
 
@@ -22,6 +23,10 @@ export type HandTileSpec = {
 /** How far the tiles lean back from lying flat; the faces look up at the player. */
 const LEAN = THREE.MathUtils.degToRad(62);
 const hitGeometry = new THREE.BoxGeometry(1.06, 0.8, TILE_LENGTH + 0.3);
+/** Gold rim drawn just outside a playable tile, like the iOS hand. Only its back faces show, so it reads as an outline. */
+const RIM = 0.13;
+const rimPlayable = new THREE.MeshBasicMaterial({ color: "#f2c14e", side: THREE.BackSide, toneMapped: false });
+const rimSelected = new THREE.MeshBasicMaterial({ color: "#ffe08a", side: THREE.BackSide, toneMapped: false });
 
 const HandTile = memo(function HandTile({
   tile,
@@ -34,15 +39,15 @@ const HandTile = memo(function HandTile({
   scale: number;
   onTap: (id: string) => void;
 }) {
-  const lift = tile.selected ? 0.55 : tile.playable ? 0.16 : 0;
+  const lift = tile.selected ? 0.6 : tile.playable ? 0.32 : 0;
   const spring = useSpring({ y: lift, config: { tension: 320, friction: 22 } });
   const material = useMemo(
     () =>
       new THREE.MeshPhysicalMaterial({
         ...IVORY,
-        color: tile.dim ? "#c2bcae" : ivoryTint(tile.a, tile.b),
-        emissive: tile.selected ? "#f0c86b" : tile.playable ? "#caa24a" : "#000000",
-        emissiveIntensity: tile.selected ? 0.35 : tile.playable ? 0.1 : 0,
+        color: tile.dim ? "#8d877c" : ivoryTint(tile.a, tile.b),
+        emissive: tile.selected ? "#f0c86b" : tile.playable ? "#e0b350" : "#000000",
+        emissiveIntensity: tile.selected ? 0.4 : tile.playable ? 0.22 : 0,
       }),
     [tile.a, tile.b, tile.dim, tile.selected, tile.playable],
   );
@@ -53,6 +58,14 @@ const HandTile = memo(function HandTile({
       {/* Stand the tile on its lower short edge, leaning back on the ledge. */}
       <group rotation={[LEAN, 0, 0]} position={[0, (TILE_LENGTH / 2) * Math.sin(LEAN) + 0.06, 0]}>
         <TileBody a={tile.a} b={tile.b} material={material} />
+        {(tile.playable || tile.selected) && (
+          <RoundedBox
+            args={[TILE_WIDTH + RIM * 2, TILE_HEIGHT + RIM, TILE_LENGTH + RIM * 2]}
+            radius={0.09}
+            smoothness={3}
+            material={tile.selected ? rimSelected : rimPlayable}
+          />
+        )}
         <mesh
           geometry={hitGeometry}
           visible={false}
