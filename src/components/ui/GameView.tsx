@@ -8,8 +8,10 @@ import { api } from "../../../convex/_generated/api";
 import { DRINK_REACTION, HURRY_REACTION, NO_DRINK_REACTION, REACTIONS, isTeamMatch, type Side, type Tile } from "../../../convex/lib/rules";
 import type { GhostSpec } from "@/components/3d/GameScene";
 import type { RackSpec } from "@/components/3d/OpponentRack";
-import { useT } from "@/lib/i18n";
+import { botLine, TALK_CHANCE, TALK_GAP_MS, type TalkEvent } from "@/lib/botTalk";
+import { useLangStore, useT } from "@/lib/i18n";
 import { playSfx, unlockAudio } from "@/lib/sound";
+import { loadZoom, saveZoom } from "@/lib/zoom";
 import { releaseLandscape, toggleFullscreen, tryLockLandscape, useGameViewport } from "@/lib/useGameViewport";
 import type { GameState } from "@/lib/types";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -56,7 +58,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   const recordRound = useProfileStore((st) => st.recordRound);
 
   const { selectedTileId, select, toast, showToast, clearToast, pending, setPending } = useGameStore();
-  const [zoom, setZoom] = useState(1);
+  // Saved per device, like the iOS app. Pinch or +/- to change it.
+  const [zoom, setZoomRaw] = useState(1);
+  useEffect(() => setZoomRaw(loadZoom()), []);
+  const setZoom = useCallback((f: (z: number) => number) => setZoomRaw((z) => saveZoom(f(z))), []);
   const viewport = useGameViewport();
   const { compact } = viewport;
   // Phones: ask the browser to rotate on the first tap where it can (Android).
@@ -324,6 +329,115 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedRound]);
 
+  // Pinch the table to zoom (two fingers), or ctrl + scroll / trackpad pinch on a computer.
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const touchDist = (e: React.TouchEvent) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  const pinchHandlers = {
+    onTouchStart: (e: React.TouchEvent) => {
+      if (e.touches.length === 2) pinch.current = { dist: touchDist(e), zoom: zoomRef.current };
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      const p = pinch.current;
+      if (!p || e.touches.length !== 2) return;
+      const ratio = touchDist(e) / Math.max(p.dist, 1);
+      // Fingers apart brings the table closer (a smaller zoom).
+      setZoom(() => p.zoom / ratio);
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      if (e.touches.length < 2) pinch.current = null;
+    },
+  };
+  // Mouse wheel and trackpad pinch (which arrives as ctrl + wheel). The game
+  // screen never scrolls, so the wheel is free; the page itself must not zoom.
+  const tableBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = tableBox.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => z * Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [setZoom]);
+
+  // CPU table talk: bots react to the game in their bubbles, now and then.
+  const lang = useLangStore((st) => st.lang);
+  const [talk, setTalk] = useState<Record<number, { text: string; at: number }>>({});
+  const talkedAt = useRef<Record<number, number>>({});
+  const botSay = (seat: number, event: TalkEvent) => {
+    if (Math.random() >= TALK_CHANCE[event]) return;
+    const now = Date.now();
+    const endOfRound = event === "won" || event === "lost";
+    if (!endOfRound && now - (talkedAt.current[seat] ?? 0) < TALK_GAP_MS) return;
+    talkedAt.current[seat] = now;
+    // A hair after the action, so it reads as a reply.
+    setTalk((m) => ({ ...m, [seat]: { text: botLine(event, room.cpuLevel, lang), at: now + 1 } }));
+  };
+  const talkedAction = useRef(room.lastAction?.at ?? 0);
+  useEffect(() => {
+    const a = room.lastAction;
+    if (!a || a.at === talkedAction.current) return;
+    talkedAction.current = a.at;
+    if (room.status !== "playing") return; // the round-end line comes from the finish below
+    const bots = seats.filter((x) => x.isBot);
+    if (bots.length === 0) return;
+    if (bots.some((b) => b.seatIndex === a.seatIndex)) {
+      if (a.kind === "play") botSay(a.seatIndex, "played");
+      if (a.kind === "pass") botSay(a.seatIndex, "passed");
+    } else if (me && a.seatIndex === me.seatIndex && (a.kind === "pass" || a.kind === "draw")) {
+      const rivals = bots.filter((b) => !isTeams || b.team !== me.team);
+      const bot = rivals[Math.floor(Math.random() * rivals.length)];
+      if (bot) botSay(bot.seatIndex, "youStuck");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.lastAction?.at]);
+  const talkedRound = useRef(finishedRound);
+  useEffect(() => {
+    if (!finishedRound || finishedRound === talkedRound.current) return;
+    talkedRound.current = finishedRound;
+    const winner = seats.find((x) => x.seatIndex === room.winnerSeat);
+    if (!winner) return;
+    if (winner.isBot) return botSay(winner.seatIndex, "won");
+    const losers = seats.filter((x) => x.isBot && x.team !== winner.team);
+    const loser = losers[Math.floor(Math.random() * losers.length)];
+    if (loser) botSay(loser.seatIndex, "lost");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedRound]);
+  const bubbleSeats = useMemo(
+    () => seats.map((x) => (talk[x.seatIndex] && talk[x.seatIndex].at > (x.reaction?.at ?? 0) ? { ...x, reaction: talk[x.seatIndex] } : x)),
+    [seats, talk],
+  );
+
+  // Winning slam: a round won by domino slams its last tile down. The summary
+  // waits a moment so everyone sees it.
+  const slam =
+    room.status === "finished" && room.winReason === "domino" && room.lastAction?.kind === "play" && room.lastAction.tileId
+      ? { key: `${room.id}:${room.round}`, tileId: room.lastAction.tileId, big: room.lastRound?.bonusKind === "capicua" }
+      : null;
+  const [summaryRound, setSummaryRound] = useState(finishedRound);
+  useEffect(() => {
+    if (!finishedRound) return setSummaryRound(0);
+    if (!slam) return setSummaryRound(finishedRound);
+    const id = setTimeout(() => setSummaryRound(finishedRound), SLAM_SUMMARY_DELAY_MS);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedRound]);
+  const slamAt = useRef<string | null>(null);
+  useEffect(() => {
+    if (!slam || slamAt.current === slam.key) return;
+    slamAt.current = slam.key;
+    // The thud lands as the tile hits the table.
+    const id = setTimeout(() => {
+      if (!muted) playSfx(slam.big ? "slamBig" : "slam");
+      buzz(slam.big ? [60, 40, 90] : 60);
+    }, 220);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slam?.key]);
+
   const ghostKey = selected ? `${selected.id}:${selectedSides.join(",")}` : "";
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ghosts: GhostSpec[] = useMemo(() => (selected ? selectedSides.map((side) => ({ side, tile: selected })) : []), [ghostKey]);
@@ -523,7 +637,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
 
       {/* 3D table */}
       <div className={compact ? "absolute inset-0" : "relative min-h-0 flex-1"}>
-        <div className="absolute inset-0">
+        <div ref={tableBox} className="absolute inset-0" {...pinchHandlers}>
           <GameScene
             board={room.board}
             openEnds={room.openEnds}
@@ -538,6 +652,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             hand={handSpecs}
             onHandTap={onHandTap}
             boneyardCount={room.mode === "draw" ? room.boneyardCount : 0}
+            slam={slam}
           />
         </div>
 
@@ -589,7 +704,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             {idleText}
           </div>
         )}
-        <ReactionBubbles seats={seats} mySeat={mySeat} muted={muted} />
+        <ReactionBubbles seats={bubbleSeats} mySeat={mySeat} muted={muted} />
         {rulesNotice && (
           <div
             role="alert"
@@ -723,7 +838,7 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
         </div>
       </footer>
 
-      {room.status === "finished" && (
+      {room.status === "finished" && summaryRound === finishedRound && (
         <RoundOverSheet
           state={state}
           seats={seats}
@@ -992,10 +1107,16 @@ function RoundOverSheet({
 
   return (
     <div className="absolute inset-0 z-20 flex items-end bg-black/50 backdrop-blur-[2px] sm:items-center sm:justify-center">
+      {/* ¡Zapatero!: a shoe spins across the screen and lands with a bounce. */}
+      {room.zapatero && (
+        <span className="zapatero-shoe pointer-events-none absolute z-30 text-[90px] leading-none" aria-hidden>
+          👞
+        </span>
+      )}
       <div className="mx-auto max-h-full w-full max-w-lg overflow-y-auto rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         {room.zapatero && (
-          <p className="text-center text-3xl font-black tracking-wide text-brass-light">{t("¡Zapatero!")}</p>
+          <p className="zapatero-pop text-center text-3xl font-black tracking-wide text-brass-light">{t("¡Zapatero!")}</p>
         )}
         <h2 className="text-center text-2xl font-bold">{headline}</h2>
         <p className="mt-1 text-center text-sm text-stone-400">
@@ -1105,6 +1226,8 @@ function useCountdown(deadline: number | null): number | null {
 }
 
 const BUBBLE_MS = 3200;
+/** How long the round summary waits for the winning slam to play out. */
+const SLAM_SUMMARY_DELAY_MS = 1500;
 /** Quiet time on a turn before the game points out whose turn it is. */
 const IDLE_HINT_MS = 6000;
 
@@ -1156,7 +1279,7 @@ function ReactionBubbles({ seats, mySeat, muted }: { seats: Seat[]; mySeat: numb
 }
 
 /** A short vibration. Browsers refuse it before the first tap, so it waits for one. */
-function buzz(ms: number) {
+function buzz(ms: number | number[]) {
   const nav = navigator as Navigator & { userActivation?: { hasBeenActive: boolean } };
   if (nav.userActivation && !nav.userActivation.hasBeenActive) return;
   nav.vibrate?.(ms);
