@@ -3,6 +3,7 @@
 import { LangToggle } from "@/components/ui/LangToggle";
 import { useT } from "@/lib/i18n";
 import { useMutation } from "convex/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
@@ -268,6 +269,10 @@ export default function Home() {
         <button onClick={newTabIdentity} className="underline decoration-dotted underline-offset-4">
           {session?.isTabIdentity ? t("Using a separate identity in this tab") : t("Testing? Use a separate player in this tab")}
         </button>
+        <nav className="mt-3 flex justify-center gap-4">
+          <Link href="/privacy" className="underline-offset-4 active:underline">{t("Privacy")}</Link>
+          <Link href="/support" className="underline-offset-4 active:underline">{t("Support")}</Link>
+        </nav>
       </footer>
     </main>
   );
