@@ -33,6 +33,12 @@ type Dir = { x: number; z: number };
 
 const angleFor = (d: Dir) => Math.atan2(d.x, d.z);
 
+/**
+ * Tiles a corner runs down before the chain turns back. The next row starts
+ * beside the last one, so rows end up a tile and a half apart (same as iOS).
+ */
+export const CORNER_RUN = 2;
+
 function walkBranch(
   tiles: { id: string; inner: number; outer: number; isDouble: boolean }[],
   start: number,
@@ -43,34 +49,41 @@ function walkBranch(
   let px = start;
   let pz = 0;
   let dir: Dir = { x: sign, z: 0 };
+  // Inside a corner: straight tiles left to run down before turning, and
+  // which way the row was heading before the corner.
+  let downLeft = 0;
+  let rowDirX: number = sign;
   let afterCorner = false;
 
   for (const t of tiles) {
     const horizontal = dir.z === 0;
+    if (horizontal && !t.isDouble && Math.abs(px + dir.x * 2) > limit) {
+      // Start the corner: run along ±z from just past the row's end,
+      // overlapping the last row tile's width.
+      rowDirX = dir.x;
+      px += dir.x * 0.5;
+      pz -= sign * 0.5;
+      dir = { x: 0, z: sign };
+      downLeft = CORNER_RUN;
+    }
     const crosswise = t.isDouble && !afterCorner;
     const extent = crosswise ? 1 : 2;
-
-    if (horizontal && !t.isDouble && Math.abs(px + dir.x * extent) > limit) {
-      // Corner tile: runs along ±z just past the end of the row.
-      const cdir: Dir = { x: 0, z: sign };
-      const cx = px + dir.x * 0.5;
-      const cz = pz + sign * 0.5;
-      out.push({ id: t.id, a: t.inner, b: t.outer, x: cx, z: cz, rotY: angleFor(cdir), isDouble: false });
-      // Next row starts at the corner's outer edge and runs back the other way.
-      px = px + dir.x * 1;
-      pz = pz + sign * 2;
-      dir = { x: -dir.x, z: 0 };
-      afterCorner = true;
-      continue;
-    }
-
-    const cx = px + dir.x * (extent / 2);
-    const cz = pz + dir.z * (extent / 2);
     const rot = angleFor(dir) + (crosswise ? Math.PI / 2 : 0);
-    out.push({ id: t.id, a: t.inner, b: t.outer, x: cx, z: cz, rotY: rot, isDouble: t.isDouble });
+    out.push({ id: t.id, a: t.inner, b: t.outer, x: px + (dir.x * extent) / 2, z: pz + (dir.z * extent) / 2, rotY: rot, isDouble: t.isDouble });
     px += dir.x * extent;
     pz += dir.z * extent;
     afterCorner = false;
+    if (dir.z !== 0 && !t.isDouble) {
+      downLeft -= 1;
+      if (downLeft <= 0) {
+        // Turn back: the new row tucks in beside the last tile of the run,
+        // so rows sit a tile and a half apart (center to center).
+        pz -= sign * 0.5;
+        px -= rowDirX * 0.5;
+        dir = { x: -rowDirX, z: 0 };
+        afterCorner = true;
+      }
+    }
   }
   return out;
 }
@@ -110,6 +123,22 @@ export function layoutBoard(board: BoardTile[], rowLimit = ROW_LIMIT): PlacedTil
   placed.push(...walkBranch(right, rootHalf, 1, rowLimit));
   placed.push(...walkBranch(left, -rootHalf, -1, rowLimit));
   return placed;
+}
+
+/**
+ * The same spot turned a quarter turn, so the chain runs down the screen
+ * instead of across it (upright phone, like iOS).
+ */
+export function upright(t: PlacedTile): PlacedTile {
+  return { ...t, x: -t.z, z: t.x, rotY: t.rotY - Math.PI / 2 };
+}
+
+/** Upright phones: the chain runs top to bottom, snaking in columns (same as iOS). */
+export const UPRIGHT_ROW_LIMIT = 6;
+
+/** Lays the board out upright (chain down the screen) or across it with this row limit. */
+export function layoutFor(board: BoardTile[], isUpright: boolean, rowLimit: number): PlacedTile[] {
+  return isUpright ? layoutBoard(board, UPRIGHT_ROW_LIMIT).map(upright) : layoutBoard(board, rowLimit);
 }
 
 /** Axis-aligned footprint of a placed tile, for overlap checks. */

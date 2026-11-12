@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { SCENES } from "@/lib/scenes";
 import { THEMES, getTheme, paintTheme, type ThemeGroup } from "@/lib/themes";
 import { useThemeStore } from "@/store/useThemeStore";
+import { ORIENTATION_LABELS, useOrientationStore, type TableOrientation } from "@/store/useOrientationStore";
 
 const GROUPS: ThemeGroup[] = ["Classic", "Baseball", "Countries"];
 
@@ -64,6 +65,7 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
   const { themeId, setTheme, sceneId, setScene } = useThemeStore();
   const previews = usePreviews(true);
   const t = useT();
+  const { orientation, setOrientation } = useOrientationStore();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -87,6 +89,23 @@ function ThemeSheet({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="mb-4 text-xs text-stone-400">{t("Only you see your table and background.")}</p>
+        <section className="mb-5">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">{t("Rotation")}</h3>
+          <div className="flex rounded-xl bg-black/40 p-1" role="radiogroup" aria-label={t("Rotation")}>
+            {(Object.keys(ORIENTATION_LABELS) as TableOrientation[]).map((o) => (
+              <button
+                key={o}
+                role="radio"
+                aria-checked={orientation === o}
+                onClick={() => setOrientation(o)}
+                className={`h-9 flex-1 rounded-lg text-sm font-medium transition ${orientation === o ? "bg-brass text-stone-900" : "text-stone-300 active:bg-white/10"}`}
+              >
+                {t(ORIENTATION_LABELS[o])}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-stone-400">{t("Auto-rotate follows how you hold the phone. Upright or Sideways keeps the table that way.")}</p>
+        </section>
         <section className="mb-5">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">{t("Background")}</h3>
           <div className="grid grid-cols-3 gap-3">

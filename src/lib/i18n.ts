@@ -63,6 +63,16 @@ export const ES: Record<string, string> = {
   Privacy: "Privacidad",
   Support: "Soporte",
   "Back to the game": "Volver al juego",
+  Rotation: "Rotación",
+  "Auto-rotate": "Girar solo",
+  Upright: "Vertical",
+  Sideways: "Horizontal",
+  "Rotation locked": "Rotación bloqueada",
+  "Rotation unlocked": "Rotación desbloqueada",
+  "Lock rotation": "Bloquear rotación",
+  "Unlock rotation": "Desbloquear rotación",
+  "Auto-rotate follows how you hold the phone. Upright or Sideways keeps the table that way.":
+    "Girar solo sigue cómo sostienes el teléfono. Vertical u Horizontal deja la mesa fija así.",
 
   // Joining and waiting room
   Loading: "Cargando",

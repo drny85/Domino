@@ -12,7 +12,8 @@ import { botLine, TALK_CHANCE, TALK_GAP_MS, type TalkEvent } from "@/lib/botTalk
 import { useLangStore, useT } from "@/lib/i18n";
 import { playSfx, unlockAudio } from "@/lib/sound";
 import { loadZoom, saveZoom } from "@/lib/zoom";
-import { releaseLandscape, toggleFullscreen, tryLockLandscape, useGameViewport } from "@/lib/useGameViewport";
+import { releaseLandscape, toggleFullscreen, tryLockOrientation, useGameViewport } from "@/lib/useGameViewport";
+import { useOrientationStore } from "@/store/useOrientationStore";
 import type { GameState } from "@/lib/types";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { errorMessage, useGameStore } from "@/store/useGameStore";
@@ -64,6 +65,16 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
   const setZoom = useCallback((f: (z: number) => number) => setZoomRaw((z) => saveZoom(f(z))), []);
   const viewport = useGameViewport();
   const { compact } = viewport;
+  const { orientation, setOrientation } = useOrientationStore();
+  // Like iOS: lock the table the way it is now, or let it turn with the phone again.
+  const toggleRotationLock = () => {
+    const next = orientation !== "auto" ? "auto" : window.innerHeight > window.innerWidth ? "portrait" : "landscape";
+    setOrientation(next);
+    showToast(t(next === "auto" ? "Rotation unlocked" : "Rotation locked"));
+    if (touch) void tryLockOrientation(next);
+  };
+  const [touch, setTouch] = useState(false);
+  useEffect(() => setTouch(navigator.maxTouchPoints > 0), []);
   // Phones: ask the browser to rotate on the first tap where it can (Android).
   const lockTried = useRef(false);
   const [canFullscreen, setCanFullscreen] = useState(false);
@@ -526,11 +537,11 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     <main
       id="game-root"
       className={`fixed flex flex-col overflow-hidden bg-felt-900 ${viewport.rotate ? "" : "inset-0"}`}
-      // Held upright on a phone: turn the whole game a quarter turn so it plays in landscape.
+      // A phone held the other way from the locked table: turn the whole game a quarter turn.
       style={
-        // Side padding clears notches and rounded corners. Turned a quarter, the
-        // game's left edge is the phone's top edge and its right edge the bottom.
-        viewport.rotate
+        // Side padding clears notches and rounded corners. Turned 90°, the game's
+        // left edge is the phone's top edge; turned -90°, it is the bottom edge.
+        viewport.rotate === 90
           ? ({
               top: 0,
               left: viewport.height,
@@ -542,18 +553,30 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
               "--pad-r": "max(20px, env(safe-area-inset-bottom))",
               "--pad-b": "max(20px, env(safe-area-inset-left))",
             } as React.CSSProperties)
-          : ({
-              "--pad-l": "max(20px, env(safe-area-inset-left))",
-              "--pad-r": "max(20px, env(safe-area-inset-right))",
-              "--pad-b": "max(20px, env(safe-area-inset-bottom))",
-            } as React.CSSProperties)
+          : viewport.rotate === -90
+            ? ({
+                top: viewport.width,
+                left: 0,
+                width: viewport.width,
+                height: viewport.height,
+                transform: "rotate(-90deg)",
+                transformOrigin: "top left",
+                "--pad-l": "max(20px, env(safe-area-inset-bottom))",
+                "--pad-r": "max(20px, env(safe-area-inset-top))",
+                "--pad-b": "max(20px, env(safe-area-inset-right))",
+              } as React.CSSProperties)
+            : ({
+                "--pad-l": "max(20px, env(safe-area-inset-left))",
+                "--pad-r": "max(20px, env(safe-area-inset-right))",
+                "--pad-b": "max(20px, env(safe-area-inset-bottom))",
+              } as React.CSSProperties)
       }
       onPointerDown={() => {
         unlockAudio();
         // On phones the first tap asks for full screen, which hides the browser bars where allowed.
         if (viewport.compact && navigator.maxTouchPoints > 0 && !lockTried.current) {
           lockTried.current = true;
-          void tryLockLandscape();
+          void tryLockOrientation(orientation);
         }
       }}
     >
@@ -790,6 +813,16 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
             <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.2))} className={`size-9 rounded-full text-lg leading-none ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`} aria-label={t("Zoom out")}>
               −
             </button>
+            {touch && (
+              <button
+                onClick={toggleRotationLock}
+                className={`size-9 rounded-full text-sm ${orientation === "auto" ? "" : "text-brass-light ring-1 ring-brass-light/70"} ${compact ? "bg-black/50 backdrop-blur active:bg-black/70" : "bg-white/10 active:bg-white/20"}`}
+                aria-label={orientation === "auto" ? t("Lock rotation") : t("Unlock rotation")}
+                aria-pressed={orientation !== "auto"}
+              >
+                {orientation === "auto" ? "🔓" : "🔒"}
+              </button>
+            )}
             {canFullscreen && (
               <button
                 onClick={() => void toggleFullscreen()}
