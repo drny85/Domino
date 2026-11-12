@@ -51,55 +51,72 @@ export function deal(
   return { hands, boneyard: deck };
 }
 
-/**
- * Index (into `hands`) of the player who leads: highest double, otherwise
- * highest single tile sum (ties broken by highest single pip, then lowest index).
- */
-export function findStartingPlayer(hands: Tile[][]): number {
-  let bestDouble = -1;
-  let bestDoubleIdx = -1;
-  hands.forEach((hand, idx) => {
-    for (const t of hand) {
-      if (t.a === t.b && t.a > bestDouble) {
-        bestDouble = t.a;
-        bestDoubleIdx = idx;
-      }
-    }
-  });
-  if (bestDoubleIdx >= 0) return bestDoubleIdx;
+/** A hand this many doubles or more is thrown in and everything is redealt. */
+export const REDEAL_DOUBLES = 5;
 
-  let bestSum = -1;
-  let bestHigh = -1;
-  let bestIdx = 0;
-  hands.forEach((hand, idx) => {
+export function needsRedeal(hands: Tile[][]): boolean {
+  return hands.some((h) => h.filter((t) => t.a === t.b).length >= REDEAL_DOUBLES);
+}
+
+/** Deals, and deals again while any hand holds too many doubles. */
+export function dealFair(playerCount: number, random: () => number = Math.random): { hands: Tile[][]; boneyard: Tile[] } {
+  for (;;) {
+    const d = deal(playerCount, random);
+    if (!needsRedeal(d.hands)) return d;
+  }
+}
+
+/**
+ * Who leads a new match, and with which tile: the highest double, otherwise the
+ * heaviest single tile (ties broken by highest single pip, then lowest index).
+ * The opener must play that very tile as the first tile of the match.
+ */
+export function findOpening(hands: Tile[][]): { seat: number; tileId: string } {
+  let best: { seat: number; tile: Tile } | null = null;
+  hands.forEach((hand, seat) => {
     for (const t of hand) {
-      const sum = t.a + t.b;
-      const high = Math.max(t.a, t.b);
-      if (sum > bestSum || (sum === bestSum && high > bestHigh)) {
-        bestSum = sum;
-        bestHigh = high;
-        bestIdx = idx;
-      }
+      if (t.a === t.b && (!best || best.tile.a !== best.tile.b || t.a > best.tile.a)) best = { seat, tile: t };
     }
   });
-  return bestIdx;
+  if (!best) {
+    hands.forEach((hand, seat) => {
+      for (const t of hand) {
+        const sum = t.a + t.b;
+        const high = Math.max(t.a, t.b);
+        const bSum = best ? best.tile.a + best.tile.b : -1;
+        const bHigh = best ? Math.max(best.tile.a, best.tile.b) : -1;
+        if (sum > bSum || (sum === bSum && high > bHigh)) best = { seat, tile: t };
+      }
+    });
+  }
+  const found = best as { seat: number; tile: Tile } | null;
+  return found ? { seat: found.seat, tileId: found.tile.id } : { seat: 0, tileId: "" };
+}
+
+/** Index (into `hands`) of the player who leads a new match (see `findOpening`). */
+export function findStartingPlayer(hands: Tile[][]): number {
+  return findOpening(hands).seat;
 }
 
 export function pipTotal(hand: Tile[]): number {
   return hand.reduce((sum, t) => sum + t.a + t.b, 0);
 }
 
-/** Sides on which `tile` can legally be played right now. */
-export function validSides(tile: Tile, board: BoardTile[], ends: OpenEnds): Side[] {
-  if (board.length === 0) return ["root"];
+/**
+ * Sides on which `tile` can legally be played right now. `openingTileId` is the
+ * tile the first play of a match has to be (the highest double); any other
+ * tile is refused as the opening play.
+ */
+export function validSides(tile: Tile, board: BoardTile[], ends: OpenEnds, openingTileId?: string): Side[] {
+  if (board.length === 0) return openingTileId && tile.id !== openingTileId ? [] : ["root"];
   const sides: Side[] = [];
   if (ends.left !== null && (tile.a === ends.left || tile.b === ends.left)) sides.push("left");
   if (ends.right !== null && (tile.a === ends.right || tile.b === ends.right)) sides.push("right");
   return sides;
 }
 
-export function hasPlayableTile(hand: Tile[], board: BoardTile[], ends: OpenEnds): boolean {
-  return hand.some((t) => validSides(t, board, ends).length > 0);
+export function hasPlayableTile(hand: Tile[], board: BoardTile[], ends: OpenEnds, openingTileId?: string): boolean {
+  return hand.some((t) => validSides(t, board, ends, openingTileId).length > 0);
 }
 
 /**
@@ -207,13 +224,18 @@ export function blockedWinner(hands: Tile[][], teams: number[] = hands.map((_, i
   return best;
 }
 
-/** Points the winner earns: every opposing player's remaining pips. */
-export function roundPoints(hands: Tile[][], winnerIdx: number, teams: number[] = hands.map((_, i) => i)): number {
-  return hands.reduce((sum, h, i) => (teams[i] === teams[winnerIdx] ? sum : sum + pipTotal(h)), 0);
+/**
+ * Points the winner earns: every pip left on the table, the winner's own and
+ * their partner's included.
+ */
+export function roundPoints(hands: Tile[][]): number {
+  return hands.reduce((sum, h) => sum + pipTotal(h), 0);
 }
 
-/** Opening tile for the CPU: highest double, else heaviest tile. */
-export function chooseOpeningTile(hand: Tile[]): Tile {
+/** Opening tile for the CPU: the required tile if any, else highest double, else heaviest tile. */
+export function chooseOpeningTile(hand: Tile[], openingTileId?: string): Tile {
+  const required = openingTileId ? hand.find((t) => t.id === openingTileId) : undefined;
+  if (required) return required;
   const doubles = hand.filter((t) => t.a === t.b);
   const pool = doubles.length ? doubles : hand;
   return pool.reduce((best, t) => (t.a + t.b > best.a + best.b ? t : best));

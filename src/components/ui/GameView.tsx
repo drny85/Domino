@@ -119,10 +119,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
           b: t.b,
           playable,
           selected: t.id === selectedTileId,
-          dim: !!me?.isMyTurn && !playable && room.board.length > 0,
+          dim: !!me?.isMyTurn && !playable,
         };
       }),
-    [hand, me?.isMyTurn, playableMap, selectedTileId, room.board.length],
+    [hand, me?.isMyTurn, playableMap, selectedTileId],
   );
   // Stable callback for the 3D rack; always acts on the latest hand.
   const tapRef = useRef<(id: string) => void>(() => {});
@@ -167,6 +167,10 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     }
     const sides = playableMap.get(tile.id);
     if (!sides) {
+      if (me.mustOpenWith) {
+        showToast(t("Open the match with the {tile}", { tile: me.mustOpenWith }));
+        return;
+      }
       showToast(t("{tile} doesn't match {left} or {right}", { tile: `${tile.a}-${tile.b}`, left: room.openEnds.left ?? "", right: room.openEnds.right ?? "" }));
       return;
     }
@@ -266,11 +270,17 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
     if (!b || b.at === seenBonus.current) return;
     seenBonus.current = b.at;
     const who = seats.find((x) => x.seatIndex === b.seatIndex);
+    const name = who?.name ?? t("Someone");
     setBanner({
       id: b.at,
-      text: who?.isMe
-        ? t("Everyone passed! +{n} for you", { n: b.points })
-        : t("Everyone passed! +{n} for {name}", { n: b.points, name: who?.name ?? t("Someone") }),
+      text:
+        b.kind === "salida"
+          ? who?.isMe
+            ? t("Pase de salida! +{n} for you", { n: b.points })
+            : t("Pase de salida! +{n} for {name}", { n: b.points, name })
+          : who?.isMe
+            ? t("Everyone passed! +{n} for you", { n: b.points })
+            : t("Everyone passed! +{n} for {name}", { n: b.points, name }),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bonusAt]);
@@ -342,7 +352,9 @@ export function GameView({ state, sessionId }: { state: GameState; sessionId: st
       ? t("Round over")
       : me?.isMyTurn
         ? room.board.length === 0
-          ? t("Your lead: play any tile")
+          ? me.mustOpenWith
+            ? t("Open the match with the {tile}", { tile: me.mustOpenWith })
+            : t("Your lead: play any tile")
           : me.canDrawOrPass
             ? me.willDraw
               ? t("No match: draw a tile")
@@ -916,11 +928,13 @@ function describeRule(t: ReturnType<typeof useT>, c: RuleChange, sep: string) {
       ? v
       : c.key === "timer"
         ? v === "0" ? t("Off") : `${v}s`
+        : c.key === "bonusPoints"
+          ? `+${v}`
         : c.key === "bonuses"
           ? t(v === "on" ? "On" : "Off")
           : t(v === "easy" ? "Easy" : v === "hard" ? "Hard" : "Normal");
   const label = t(
-    c.key === "target" ? "Points to win" : c.key === "timer" ? "Turn timer" : c.key === "bonuses" ? "Bonuses" : "CPU level",
+    c.key === "target" ? "Points to win" : c.key === "timer" ? "Turn timer" : c.key === "bonuses" ? "Bonuses" : c.key === "bonusPoints" ? "Bonus value" : "CPU level",
   );
   return `${label}${sep}${c.from !== undefined ? `${val(c.from)} → ` : ""}${val(c.value)}`;
 }
@@ -970,7 +984,9 @@ function RoundOverSheet({
       ? winner?.isMe
         ? t("You played every tile.")
         : t("{name} played every tile.", { name: winner?.name ?? t("Someone") })
-      : room.winReason === "blocked"
+      : room.winReason === "bonus"
+        ? t("A bonus took them to the target.")
+        : room.winReason === "blocked"
         ? t("Nobody could move. Lowest pip count takes it.")
         : t("Nobody could move and the low pip counts tied. No points this round.");
 
@@ -978,6 +994,9 @@ function RoundOverSheet({
     <div className="absolute inset-0 z-20 flex items-end bg-black/50 backdrop-blur-[2px] sm:items-center sm:justify-center">
       <div className="mx-auto max-h-full w-full max-w-lg overflow-y-auto rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+        {room.zapatero && (
+          <p className="text-center text-3xl font-black tracking-wide text-brass-light">{t("¡Zapatero!")}</p>
+        )}
         <h2 className="text-center text-2xl font-bold">{headline}</h2>
         <p className="mt-1 text-center text-sm text-stone-400">
           {room.matchOver ? `${t("First to {n} points.", { n: room.targetScore })} ` : ""}

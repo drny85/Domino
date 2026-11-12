@@ -15,6 +15,7 @@ export const boardTileValidator = v.object({
 export const modeValidator = v.union(v.literal("draw"), v.literal("block"));
 export const targetScoreValidator = v.union(v.literal(100), v.literal(200));
 export const cpuLevelValidator = v.union(v.literal("easy"), v.literal("normal"), v.literal("hard"));
+export const bonusPointsValidator = v.union(v.literal(25), v.literal(30));
 export const turnSecondsValidator = v.union(v.literal(0), v.literal(20), v.literal(30));
 export const matchTypeValidator = v.union(v.literal("1v1"), v.literal("2v2"), v.literal("cpu"), v.literal("watch"));
 
@@ -28,6 +29,8 @@ export default defineSchema({
     openEnds: v.object({ left: v.nullable(v.number()), right: v.nullable(v.number()) }),
     board: v.array(boardTileValidator),
     boneyard: v.array(tileValidator),
+    // First play of a match: the opener must lead with this tile (highest double).
+    openingTileId: v.optional(v.string()),
     winnerSessionId: v.optional(v.string()),
     winReason: v.optional(v.string()),
     // Additions beyond the base spec:
@@ -51,6 +54,8 @@ export default defineSchema({
     // Host options.
     turnSeconds: v.optional(turnSecondsValidator),
     bonuses: v.optional(v.boolean()),
+    // Value of each bonus (capicúa, pase corrido, pase de salida). Defaults to 25.
+    bonusPoints: v.optional(bonusPointsValidator),
     cpuLevel: v.optional(cpuLevelValidator),
     // Turn clock: `turnId` grows every time the turn moves on.
     turnId: v.optional(v.number()),

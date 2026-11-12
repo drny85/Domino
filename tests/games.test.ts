@@ -92,7 +92,7 @@ describe("turn validation", () => {
     const s = await t.query(api.games.getGameState, { roomId, sessionId: S(0) });
     const turn = s!.room.currentTurnSeat;
     const me = await t.query(api.games.getGameState, { roomId, sessionId: S(turn) });
-    await t.mutation(api.games.playTile, { roomId, sessionId: S(turn), tileId: me!.me!.hand[0].id, targetSide: "root" });
+    await t.mutation(api.games.playTile, { roomId, sessionId: S(turn), tileId: me!.me!.playable[0].tileId, targetSide: "root" });
     const next = (turn + 1) % 2;
     const n = await t.query(api.games.getGameState, { roomId, sessionId: S(next) });
     if (n!.me!.playable.length > 0) {
@@ -114,7 +114,7 @@ async function playOut(playerCount: number, mode: "draw" | "block") {
     const s = (await t.query(api.games.getGameState, { roomId, sessionId: sid }))!;
     expect(s.me!.isMyTurn).toBe(true);
     if (s.room.board.length === 0) {
-      await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: s.me!.hand[0].id, targetSide: "root" });
+      await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: s.me!.playable[0].tileId, targetSide: "root" });
     } else if (s.me!.playable.length) {
       const p = s.me!.playable[0];
       const tile = s.me!.hand.find((h) => h.id === p.tileId)!;
@@ -148,8 +148,9 @@ describe("full games", () => {
       } else {
         const w = everyone.find((p) => p.seatIndex === s.room.winnerSeat)!;
         if (s.room.winReason === "domino") expect(w.tiles).toBe(0);
-        const opposing = everyone.filter((p) => p.team !== w.team).reduce((a, p) => a + p.pips, 0);
-        expect(w.score).toBe(opposing);
+        // The winner takes every pip left on the table, partner's and own included.
+        const onTable = everyone.reduce((a, p) => a + p.pips, 0);
+        expect(w.score).toBe(onTable);
         if (s.room.winReason === "blocked") {
           const teamPips = (team: number) => everyone.filter((p) => p.team === team).reduce((a, p) => a + p.pips, 0);
           for (const p of everyone) if (p.team !== w.team) expect(teamPips(w.team)).toBeLessThan(teamPips(p.team));
@@ -204,7 +205,7 @@ describe("match types", () => {
         if (s.room.status === "finished") break;
         expect(s.me!.isMyTurn).toBe(true); // CPU never leaves the turn hanging
         if (s.room.board.length === 0) {
-          await t.mutation(api.games.playTile, { roomId: r.roomId, sessionId: S(0), tileId: s.me!.hand[0].id, targetSide: "root" });
+          await t.mutation(api.games.playTile, { roomId: r.roomId, sessionId: S(0), tileId: s.me!.playable[0].tileId, targetSide: "root" });
         } else if (s.me!.playable.length) {
           const p = s.me!.playable[0];
           await t.mutation(api.games.playTile, { roomId: r.roomId, sessionId: S(0), tileId: p.tileId, targetSide: p.sides[0] });
@@ -265,7 +266,7 @@ describe("points to win", () => {
       const sid = S(pub.room.currentTurnSeat);
       const s = (await t.query(api.games.getGameState, { roomId, sessionId: sid }))!;
       if (s.room.board.length === 0) {
-        await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: s.me!.hand[0].id, targetSide: "root" });
+        await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: s.me!.playable[0].tileId, targetSide: "root" });
       } else if (s.me!.playable.length) {
         const p = s.me!.playable[0];
         await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: p.tileId, targetSide: p.sides[0] });
@@ -286,6 +287,9 @@ describe("house rules and table extras", () => {
     expect(s.room.bonuses).toBe(true);
     expect(s.room.turnSeconds).toBe(20);
     expect(s.room.cpuLevel).toBe("hard");
+    expect(s.room.bonusPoints).toBe(25);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonusPoints: 30 });
+    expect((await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!.room.bonusPoints).toBe(30);
   });
 
   it("accepts listed reactions and avatars only", async () => {
@@ -359,6 +363,163 @@ describe("who opens", () => {
       }
     }
     vi.useRealTimers();
+  });
+});
+
+describe("opening play", () => {
+
+  it("the first round of a match must open with the highest double; later rounds open with any tile", async () => {
+    for (let g = 0; g < 6; g++) {
+      const { t, roomId } = await setupRoom(4, "block");
+      await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+      const hands = await t.run(async (ctx) => (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex).map((p) => p.hand));
+      // Four players hold all 28 tiles, so the 6-6 is always out.
+      const opener = hands.findIndex((h) => h.some((x) => x.id === "6-6"));
+      const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(opener) }))!;
+      expect(s.room.currentTurnSeat).toBe(opener);
+      expect(s.me!.mustOpenWith).toBe("6-6");
+      expect(s.me!.playable).toEqual([{ tileId: "6-6", sides: ["root"] }]);
+      const other = hands[opener].find((x) => x.id !== "6-6")!;
+      await expect(
+        t.mutation(api.games.playTile, { roomId, sessionId: S(opener), tileId: other.id, targetSide: "root" }),
+      ).rejects.toThrow(/highest double/);
+      // Nobody else is told what to open with.
+      const watcher = (await t.query(api.games.getGameState, { roomId, sessionId: S((opener + 1) % 4) }))!;
+      expect(watcher.me!.mustOpenWith).toBeNull();
+      await t.mutation(api.games.playTile, { roomId, sessionId: S(opener), tileId: "6-6", targetSide: "root" });
+
+      // Play the round out, then the next round's opener may lead with anything.
+      for (let step = 0; step < 200; step++) {
+        const pub = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+        if (pub.room.status === "finished") break;
+        const sid = S(pub.room.currentTurnSeat);
+        const me = (await t.query(api.games.getGameState, { roomId, sessionId: sid }))!.me!;
+        if (me.playable.length) await t.mutation(api.games.playTile, { roomId, sessionId: sid, tileId: me.playable[0].tileId, targetSide: me.playable[0].sides[0] });
+        else await t.mutation(api.games.drawOrPass, { roomId, sessionId: sid });
+      }
+      await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+      const r2 = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+      const lead = (await t.query(api.games.getGameState, { roomId, sessionId: S(r2.room.currentTurnSeat) }))!.me!;
+      expect(lead.mustOpenWith).toBeNull();
+      expect(lead.playable).toHaveLength(7);
+    }
+  });
+});
+
+describe("round points", () => {
+  it("a 2v2 winner scores every pip left on the table, the partner's included", async () => {
+    const { t, roomId } = await setupRoom(4, "block");
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    const players = await t.run(async (ctx) => (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex));
+    const room = await t.run(async (ctx) => (await ctx.db.query("rooms").collect())[0]);
+    // Seat 0 is about to domino with the 2-3 on a 3 end. Partner (seat 2) holds 10 pips.
+    await t.run(async (ctx) => {
+      await ctx.db.patch(room._id, {
+        currentTurnSeat: 0,
+        openingTileId: undefined,
+        board: [{ id: "3-3", a: 3, b: 3, isDouble: true, placedSide: "root", flipped: false }],
+        openEnds: { left: 3, right: 3 },
+      });
+      await ctx.db.patch(players[0]._id, { hand: [{ id: "2-3", a: 2, b: 3 }] });
+      await ctx.db.patch(players[1]._id, { hand: [{ id: "6-6", a: 6, b: 6 }] });
+      await ctx.db.patch(players[2]._id, { hand: [{ id: "4-6", a: 4, b: 6 }] });
+      await ctx.db.patch(players[3]._id, { hand: [{ id: "0-1", a: 0, b: 1 }] });
+    });
+    await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: "2-3", targetSide: "right" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.winReason).toBe("domino");
+    expect(s.room.lastRound?.points).toBe(12 + 10 + 1);
+    expect(s.me!.score).toBe(23);
+  });
+});
+
+describe("bonuses", () => {
+  /** Two players; seat 0 has just opened with the 6-6 and seat 1 is to move. */
+  async function afterOpening(mode: "draw" | "block", seat1: { id: string; a: number; b: number }[], bonusPoints?: 25 | 30, bonuses = true) {
+    const { t, roomId } = await setupRoom(2, mode);
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses, ...(bonusPoints ? { bonusPoints } : {}) });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    await t.run(async (ctx) => {
+      const room = (await ctx.db.query("rooms").collect())[0];
+      const players = (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex);
+      await ctx.db.patch(room._id, { currentTurnSeat: 0, openingTileId: "6-6" });
+      await ctx.db.patch(players[0]._id, { hand: [{ id: "6-6", a: 6, b: 6 }, { id: "0-0", a: 0, b: 0 }, { id: "6-3", a: 6, b: 3 }] });
+      await ctx.db.patch(players[1]._id, { hand: seat1 });
+    });
+    await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: "6-6", targetSide: "root" });
+    return { t, roomId };
+  }
+  const score = async (t: Awaited<ReturnType<typeof afterOpening>>["t"], roomId: Awaited<ReturnType<typeof afterOpening>>["roomId"], seat: number) =>
+    (await t.query(api.games.getGameState, { roomId, sessionId: S(seat) }))!.me!.score;
+
+  it("pase de salida: the opener scores when the next player has to pass", async () => {
+    const { t, roomId } = await afterOpening("block", [{ id: "0-1", a: 0, b: 1 }, { id: "2-3", a: 2, b: 3 }]);
+    await t.mutation(api.games.drawOrPass, { roomId, sessionId: S(1) });
+    expect(await score(t, roomId, 0)).toBe(25);
+    expect(await score(t, roomId, 1)).toBe(0);
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(s.room.bonusEvent).toMatchObject({ seatIndex: 0, kind: "salida", points: 25 });
+  });
+
+  it("in draw mode, drawing after the opening tile pays nothing; a real pass (empty boneyard) pays the bonus value", async () => {
+    const drew = await afterOpening("draw", [{ id: "0-1", a: 0, b: 1 }], 30);
+    await drew.t.mutation(api.games.drawOrPass, { roomId: drew.roomId, sessionId: S(1) });
+    expect(await score(drew.t, drew.roomId, 0)).toBe(0);
+
+    const passed = await afterOpening("draw", [{ id: "0-1", a: 0, b: 1 }], 30);
+    await passed.t.run(async (ctx) => ctx.db.patch(passed.roomId, { boneyard: [] }));
+    await passed.t.mutation(api.games.drawOrPass, { roomId: passed.roomId, sessionId: S(1) });
+    expect(await score(passed.t, passed.roomId, 0)).toBe(30);
+  });
+
+  it("no pase de salida when the next player answers, or when bonuses are off", async () => {
+    const answered = await afterOpening("block", [{ id: "6-1", a: 6, b: 1 }, { id: "2-3", a: 2, b: 3 }]);
+    await answered.t.mutation(api.games.playTile, { roomId: answered.roomId, sessionId: S(1), tileId: "6-1", targetSide: "right" });
+    expect(await score(answered.t, answered.roomId, 0)).toBe(0);
+    const off = await afterOpening("block", [{ id: "0-1", a: 0, b: 1 }, { id: "2-3", a: 2, b: 3 }], undefined, false);
+    await off.t.mutation(api.games.drawOrPass, { roomId: off.roomId, sessionId: S(1) });
+    expect(await score(off.t, off.roomId, 0)).toBe(0);
+  });
+
+  it("a bonus that reaches the target ends the match on the spot, and a shutout is a zapatero", async () => {
+    const { t, roomId } = await afterOpening("block", [{ id: "0-1", a: 0, b: 1 }, { id: "2-3", a: 2, b: 3 }]);
+    await t.run(async (ctx) => {
+      const p0 = (await ctx.db.query("players").collect()).find((p) => p.seatIndex === 0)!;
+      await ctx.db.patch(p0._id, { score: 190 });
+    });
+    const result = await t.mutation(api.games.drawOrPass, { roomId, sessionId: S(1) });
+    expect(result.result).toBe("won");
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(s.room.status).toBe("finished");
+    expect(s.room.winReason).toBe("bonus");
+    expect(s.room.matchOver).toBe(true);
+    expect(s.room.matchWinnerTeam).toBe(0);
+    expect(s.room.zapatero).toBe(true);
+    expect(s.room.lastRound).toMatchObject({ points: 25, bonus: 25, bonusKind: "salida" });
+  });
+
+  it("a capicúa pays the room's bonus value", async () => {
+    const { t, roomId } = await setupRoom(2, "block");
+    await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true, bonusPoints: 30 });
+    await t.mutation(api.games.startGame, { roomId, sessionId: S(0) });
+    await t.run(async (ctx) => {
+      const room = (await ctx.db.query("rooms").collect())[0];
+      const players = (await ctx.db.query("players").collect()).sort((a, b) => a.seatIndex - b.seatIndex);
+      await ctx.db.patch(room._id, {
+        currentTurnSeat: 0,
+        openingTileId: undefined,
+        board: [
+          { id: "2-4", a: 2, b: 4, isDouble: false, placedSide: "root", flipped: false },
+          { id: "4-5", a: 4, b: 5, isDouble: false, placedSide: "right", flipped: false },
+        ],
+        openEnds: { left: 2, right: 5 },
+      });
+      await ctx.db.patch(players[0]._id, { hand: [{ id: "2-5", a: 2, b: 5 }] });
+      await ctx.db.patch(players[1]._id, { hand: [{ id: "6-6", a: 6, b: 6 }] });
+    });
+    await t.mutation(api.games.playTile, { roomId, sessionId: S(0), tileId: "2-5", targetSide: "right" });
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(0) }))!;
+    expect(s.room.lastRound).toMatchObject({ points: 12 + 30, bonus: 30, bonusKind: "capicua" });
   });
 });
 
