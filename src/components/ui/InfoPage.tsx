@@ -36,8 +36,10 @@ export function InfoPage({ copy }: { copy: Record<Lang, InfoCopy> }) {
   );
 }
 
-/** A mailto link styled for the info pages. */
+/** A mailto link styled for the info pages; until there is an address, a short note instead. */
 export function MailLink({ email }: { email: string }) {
+  const lang = useLangStore((s) => s.lang);
+  if (!email) return <span className="font-semibold text-stone-200">{lang === "es" ? "nuestro correo de soporte (muy pronto)" : "our support email (coming soon)"}</span>;
   return (
     <a href={`mailto:${email}`} className="font-semibold text-brass-light underline underline-offset-2">
       {email}
