@@ -36,6 +36,7 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("draw");
   const [targetScore, setTargetScore] = useState<100 | 200>(200);
   const [cpuLevel, setCpuLevel] = useState<"easy" | "normal" | "hard">("normal");
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const { avatar, setAvatar, stats } = useProfileStore();
   // Saved choices only exist in the browser; wait for it before showing them.
   const [mounted, setMounted] = useState(false);
@@ -139,66 +140,88 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Rules")}>
-          {(["draw", "block"] as const).map((m) => (
-            <button
-              key={m}
-              role="radio"
-              aria-checked={mode === m}
-              onClick={() => setMode(m)}
-              className={`h-10 flex-1 rounded-lg text-sm font-medium transition ${
-                mode === m ? "bg-white/15 text-white" : "text-stone-400"
-              }`}
-            >
-              {m === "draw" ? t("Draw game") : t("Block game")}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-stone-300">{t("Points to win")}</span>
-          <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Points to win")}>
-            {([100, 200] as const).map((pts) => (
+        {/* Game options: closed by default, with the current picks as a summary (same as iOS). */}
+        <div className="rounded-xl border border-white/10 bg-black/20">
+          <button
+            type="button"
+            onClick={() => setOptionsOpen((o) => !o)}
+            aria-expanded={optionsOpen}
+            aria-controls="game-options"
+            className="flex min-h-12 w-full items-center gap-3 px-3 text-left"
+          >
+            <span className="text-sm font-semibold text-stone-200">{t("Game options")}</span>
+            <span className="ml-auto truncate text-sm text-stone-400">
+              {[mode === "draw" ? t("Draw") : t("Block"), targetScore, ...(matchType === "cpu" || matchType === "watch" ? [t(cpuLevel === "easy" ? "Easy" : cpuLevel === "hard" ? "Hard" : "Normal")] : [])].join(" · ")}
+            </span>
+            <span className={`text-stone-400 transition-transform ${optionsOpen ? "rotate-180" : ""}`} aria-hidden>
+              ▾
+            </span>
+          </button>
+          {optionsOpen && (
+            <div id="game-options" className="space-y-3 border-t border-white/10 p-3">
+          <div className="flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Rules")}>
+            {(["draw", "block"] as const).map((m) => (
               <button
-                key={pts}
+                key={m}
                 role="radio"
-                aria-checked={targetScore === pts}
-                onClick={() => setTargetScore(pts)}
-                className={`h-9 w-16 rounded-lg text-sm font-semibold transition ${
-                  targetScore === pts ? "bg-white/15 text-white" : "text-stone-400"
+                aria-checked={mode === m}
+                onClick={() => setMode(m)}
+                className={`h-10 flex-1 rounded-lg text-sm font-medium transition ${
+                  mode === m ? "bg-white/15 text-white" : "text-stone-400"
                 }`}
               >
-                {pts}
+                {m === "draw" ? t("Draw game") : t("Block game")}
               </button>
             ))}
           </div>
-        </div>
-
-        {(matchType === "cpu" || matchType === "watch") && (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-stone-300">{t("CPU level")}</span>
-            <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("CPU level")}>
-              {(["easy", "normal", "hard"] as const).map((lv) => (
+            <span className="text-sm text-stone-300">{t("Points to win")}</span>
+            <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("Points to win")}>
+              {([100, 200] as const).map((pts) => (
                 <button
-                  key={lv}
+                  key={pts}
                   role="radio"
-                  aria-checked={cpuLevel === lv}
-                  onClick={() => setCpuLevel(lv)}
-                  className={`h-9 rounded-lg px-3 text-sm font-semibold capitalize transition ${
-                    cpuLevel === lv ? "bg-white/15 text-white" : "text-stone-400"
+                  aria-checked={targetScore === pts}
+                  onClick={() => setTargetScore(pts)}
+                  className={`h-9 w-16 rounded-lg text-sm font-semibold transition ${
+                    targetScore === pts ? "bg-white/15 text-white" : "text-stone-400"
                   }`}
                 >
-                  {t(lv === "easy" ? "Easy" : lv === "normal" ? "Normal" : "Hard")}
+                  {pts}
                 </button>
               ))}
             </div>
           </div>
-        )}
 
-        <p className="text-xs text-stone-400">
-          {mode === "draw"
-            ? t("Can't play? Draw from the boneyard until you can.")
-            : t("Can't play? Pass. No drawing.")}
-        </p>
+          {(matchType === "cpu" || matchType === "watch") && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-stone-300">{t("CPU level")}</span>
+              <div className="ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1" role="radiogroup" aria-label={t("CPU level")}>
+                {(["easy", "normal", "hard"] as const).map((lv) => (
+                  <button
+                    key={lv}
+                    role="radio"
+                    aria-checked={cpuLevel === lv}
+                    onClick={() => setCpuLevel(lv)}
+                    className={`h-9 rounded-lg px-3 text-sm font-semibold capitalize transition ${
+                      cpuLevel === lv ? "bg-white/15 text-white" : "text-stone-400"
+                    }`}
+                  >
+                    {t(lv === "easy" ? "Easy" : lv === "normal" ? "Normal" : "Hard")}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-stone-400">
+            {mode === "draw"
+              ? t("Can't play? Draw from the boneyard until you can.")
+              : t("Can't play? Pass. No drawing.")}
+          </p>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={onCreate}

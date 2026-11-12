@@ -48,3 +48,21 @@ body {
   to { opacity: 1; scale: 1; }
 }
 .bubble-in { animation: bubble-in 180ms ease-out; }
+
+/* ¡Zapatero!: the shoe flies in from the left, spinning, and bounces to a stop. */
+@keyframes zapatero-shoe {
+  0% { left: -20%; top: 70%; rotate: -540deg; scale: 0.5; }
+  55% { left: 52%; top: 18%; rotate: -40deg; scale: 1.25; }
+  70% { left: 60%; top: 26%; rotate: 15deg; scale: 1; }
+  82% { left: 63%; top: 21%; rotate: -8deg; scale: 1.05; }
+  100% { left: 64%; top: 24%; rotate: 0deg; scale: 1; }
+}
+.zapatero-shoe { left: 64%; top: 24%; translate: -50% -50%; animation: zapatero-shoe 1.6s cubic-bezier(0.2, 0.7, 0.3, 1) both; filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.5)); }
+@keyframes zapatero-pop {
+  from { scale: 0.4; rotate: -12deg; opacity: 0; }
+  to { scale: 1; rotate: 0deg; opacity: 1; }
+}
+.zapatero-pop { animation: zapatero-pop 450ms cubic-bezier(0.3, 1.6, 0.5, 1) 300ms both; }
+@media (prefers-reduced-motion: reduce) {
+  .zapatero-shoe, .zapatero-pop { animation: none; }
+}

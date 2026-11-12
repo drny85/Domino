@@ -2,7 +2,7 @@
 
 import { Environment, Lightformer } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { memo, Suspense, useMemo, useRef } from "react";
+import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
@@ -19,6 +19,8 @@ import { SceneProps } from "./SceneProps";
 import { Table } from "./Table";
 
 export type GhostSpec = { side: Side; tile: Tile };
+/** The round's winning tile, slammed onto the table. `big` for a capicúa. */
+export type SlamSpec = { key: string; tileId: string; big: boolean };
 
 type SceneProps = {
   board: BoardTile[];
@@ -40,7 +42,75 @@ type SceneProps = {
   boneyardCount: number;
   /** Called once, after the first frame has been drawn. */
   onReady?: () => void;
+  slam?: SlamSpec | null;
 };
+
+const SLAM_DROP_S = 0.22;
+const SLAM_HOP_S = 0.36;
+const SLAM_SHAKE_S = 0.45;
+
+/**
+ * Plays the winning slam: the last tile drops hard from above, then the table
+ * shakes and every other tile hops. Driven by the clock in useFrame (the
+ * canvas only draws on demand, so it asks for frames while it runs).
+ */
+function SlamDriver({
+  slam,
+  tiles,
+  table,
+}: {
+  slam: SlamSpec | null | undefined;
+  tiles: React.MutableRefObject<Map<string, THREE.Group>>;
+  table: React.MutableRefObject<THREE.Group | null>;
+}) {
+  const invalidate = useThree((st) => st.invalidate);
+  const run = useRef<{ key: string; start: number; hops: Map<string, { h: number; tilt: number }> } | null>(null);
+  // A round that was already over when the table opened is not replayed.
+  const seen = useRef<string | null>(slam?.key ?? null);
+  useEffect(() => {
+    if (!slam || seen.current === slam.key) return;
+    seen.current = slam.key;
+    const lift = slam.big ? 0.45 : 0.28;
+    const hops = new Map<string, { h: number; tilt: number }>();
+    tiles.current.forEach((_, id) => {
+      if (id !== slam.tileId) hops.set(id, { h: lift * (0.6 + Math.random() * 0.4), tilt: (Math.random() - 0.5) * 0.5 });
+    });
+    run.current = { key: slam.key, start: performance.now(), hops };
+    invalidate();
+  }, [slam, tiles, invalidate]);
+
+  useFrame(() => {
+    const r = run.current;
+    if (!r || !slam) return;
+    const t = (performance.now() - r.start) / 1000;
+    const tile = tiles.current.get(slam.tileId);
+    if (tile) {
+      const k = Math.min(t / SLAM_DROP_S, 1);
+      tile.position.y = 3.4 * (1 - k * k); // easing in: fastest as it hits
+      tile.rotation.x = 0.4 * (1 - k);
+    }
+    const after = t - SLAM_DROP_S;
+    const hopK = after > 0 && after < SLAM_HOP_S ? Math.sin((Math.PI * after) / SLAM_HOP_S) : 0;
+    r.hops.forEach((hop, id) => {
+      const g = tiles.current.get(id);
+      if (!g) return;
+      g.position.y = hop.h * hopK;
+      g.rotation.z = hop.tilt * hopK;
+    });
+    if (table.current) {
+      const shakeK = after > 0 && after < SLAM_SHAKE_S ? 1 - after / SLAM_SHAKE_S : 0;
+      const amp = (slam.big ? 0.16 : 0.1) * shakeK;
+      table.current.position.set(Math.sin(after * 90) * amp, 0, Math.cos(after * 77) * amp * 0.6);
+    }
+    if (after < Math.max(SLAM_HOP_S, SLAM_SHAKE_S)) invalidate();
+    else {
+      run.current = null;
+      if (tile) tile.position.y = 0;
+      if (table.current) table.current.position.set(0, 0, 0);
+    }
+  });
+  return null;
+}
 
 function FirstFrame({ onReady }: { onReady?: () => void }) {
   const done = useRef(false);
@@ -61,7 +131,8 @@ function rowLimitFor(aspect: number) {
   return 6;
 }
 
-function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: SceneProps) {
+function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand, slam, tableRef }: SceneProps & { tableRef: React.MutableRefObject<THREE.Group | null> }) {
+  const tileRefs = useRef(new Map<string, THREE.Group>());
   const handCount = hand.length;
   const { size } = useThree();
   const limit = rowLimitFor(size.width / Math.max(size.height, 1));
@@ -96,15 +167,25 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: S
   return (
     <>
       <CameraRig bounds={bounds} zoom={zoom} handCount={handCount} />
+      <SlamDriver slam={slam} tiles={tileRefs} table={tableRef} />
       {placed.map((t) => (
-        <DominoTile
+        <group
           key={t.id}
-          a={t.a}
-          b={t.b}
-          position={[t.x, 0, t.z]}
-          rotationY={t.rotY}
-          highlight={t.id === lastPlayedId}
-        />
+          ref={(g) => {
+            if (g) tileRefs.current.set(t.id, g);
+            else tileRefs.current.delete(t.id);
+          }}
+        >
+          <DominoTile
+            a={t.a}
+            b={t.b}
+            position={[t.x, 0, t.z]}
+            rotationY={t.rotY}
+            highlight={t.id === lastPlayedId}
+            // The slammed tile falls by the slam, not by the usual soft drop.
+            dropIn={t.id !== slam?.tileId}
+          />
+        </group>
       ))}
       {ghostPlacements.map(({ side, p }) => (
         <DominoTile
@@ -124,6 +205,7 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand }: S
 
 function GameScene(props: SceneProps) {
   const scene = getScene(useThemeStore((s) => s.sceneId));
+  const tableRef = useRef<THREE.Group | null>(null);
   return (
     <Canvas
       shadows
@@ -169,16 +251,19 @@ function GameScene(props: SceneProps) {
           <Lightformer form="rect" intensity={0.6} position={[0, 3, 10]} rotation-y={Math.PI} scale={[12, 3, 1]} color="#ffffff" />
         </Environment>
       </Suspense>
-      <Table />
       <SceneProps sceneId={scene.id} />
-      <OpponentRack side="south" count={0} active={props.myTurn} />
-      {props.racks.map((r) => (
-        <OpponentRack key={r.side} {...r} />
-      ))}
-      <HandRack tiles={props.hand} onTap={props.onHandTap} />
-      {props.drinks?.map((side) => <Drink key={side} side={side} />)}
-      <BoneyardPile count={props.boneyardCount} />
-      <Board {...props} />
+      {/* Everything on the table, so the winning slam can shake it as one. */}
+      <group ref={tableRef}>
+        <Table />
+        <OpponentRack side="south" count={0} active={props.myTurn} />
+        {props.racks.map((r) => (
+          <OpponentRack key={r.side} {...r} />
+        ))}
+        <HandRack tiles={props.hand} onTap={props.onHandTap} />
+        {props.drinks?.map((side) => <Drink key={side} side={side} />)}
+        <BoneyardPile count={props.boneyardCount} />
+        <Board {...props} tableRef={tableRef} />
+      </group>
       <FirstFrame onReady={props.onReady} />
     </Canvas>
   );

@@ -5,7 +5,7 @@
  * The context is created lazily on the first user gesture, as browsers require.
  */
 
-export type Sfx = "place" | "draw" | "pass" | "turn" | "win" | "lose" | "select";
+export type Sfx = "place" | "draw" | "pass" | "turn" | "win" | "lose" | "select" | "slam" | "slamBig";
 
 let ctx: AudioContext | null = null;
 let noise: AudioBuffer | null = null;
@@ -75,6 +75,21 @@ function tone(ac: AudioContext, t: number, freq: number, dur: number, gain = 0.1
   o.stop(t + dur + 0.02);
 }
 
+/** The winning tile slammed down: a heavy low thud under a hard clack. */
+function thud(ac: AudioContext, t: number, gain: number) {
+  const o = ac.createOscillator();
+  o.type = "sine";
+  o.frequency.setValueAtTime(110, t);
+  o.frequency.exponentialRampToValueAtTime(38, t + 0.35);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.9 * gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+  o.connect(g).connect(ac.destination);
+  o.start(t);
+  o.stop(t + 0.5);
+  clack(ac, t, 1.4 * gain);
+}
+
 export function playSfx(kind: Sfx) {
   const ac = audio();
   if (!ac || ac.state !== "running") return;
@@ -95,6 +110,18 @@ export function playSfx(kind: Sfx) {
       // Two knocks on the table, the traditional way to pass.
       clack(ac, t, 0.7);
       clack(ac, t + 0.16, 0.7);
+      break;
+    case "slam":
+      thud(ac, t, 1);
+      // The other tiles landing after their hop.
+      clack(ac, t + 0.33, 0.3);
+      clack(ac, t + 0.37, 0.25);
+      break;
+    case "slamBig":
+      thud(ac, t, 1.3);
+      clack(ac, t + 0.36, 0.4);
+      clack(ac, t + 0.4, 0.35);
+      clack(ac, t + 0.45, 0.3);
       break;
     case "turn":
       tone(ac, t, 880, 0.18, 0.08, "sine");
