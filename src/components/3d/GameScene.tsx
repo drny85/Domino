@@ -6,7 +6,7 @@ import { memo, Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { BoardTile, OpenEnds, Side, Tile } from "../../../convex/lib/rules";
 import { placeTile } from "../../../convex/lib/rules";
-import { footprint, layoutBoard } from "@/lib/boardLayout";
+import { footprint, layoutFor } from "@/lib/boardLayout";
 import { getScene } from "@/lib/scenes";
 import { useThemeStore } from "@/store/useThemeStore";
 import { CameraRig, type Bounds } from "./CameraRig";
@@ -135,22 +135,25 @@ function Board({ board, openEnds, lastPlayedId, ghosts, onGhost, zoom, hand, sla
   const tileRefs = useRef(new Map<string, THREE.Group>());
   const handCount = hand.length;
   const { size } = useThree();
-  const limit = rowLimitFor(size.width / Math.max(size.height, 1));
+  const aspect = size.width / Math.max(size.height, 1);
+  const limit = rowLimitFor(aspect);
+  // Upright phones turn the snake so the chain runs down the screen, like iOS.
+  const upright = aspect < 0.8;
 
-  const placed = useMemo(() => layoutBoard(board, limit), [board, limit]);
+  const placed = useMemo(() => layoutFor(board, upright, limit), [board, upright, limit]);
 
   const ghostPlacements = useMemo(
     () =>
       ghosts.flatMap(({ side, tile }) => {
         try {
           const next = placeTile(tile, side, board, openEnds);
-          const p = layoutBoard(next.board, limit).find((t) => t.id === tile.id);
+          const p = layoutFor(next.board, upright, limit).find((t) => t.id === tile.id);
           return p ? [{ side, p }] : [];
         } catch {
           return [];
         }
       }),
-    [ghosts, board, openEnds, limit],
+    [ghosts, board, openEnds, upright, limit],
   );
 
   const bounds = useMemo<Bounds>(() => {

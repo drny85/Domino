@@ -60,6 +60,19 @@ export const ES: Record<string, string> = {
   "In Safari, tap the Share button, then “Add to Home Screen”. The game then opens full screen like an app.":
     "En Safari, toca el botón Compartir y luego “Agregar a inicio”. El juego se abre a pantalla completa como una app.",
   Language: "Idioma",
+  Privacy: "Privacidad",
+  Support: "Soporte",
+  "Back to the game": "Volver al juego",
+  Rotation: "Rotación",
+  "Auto-rotate": "Girar solo",
+  Upright: "Vertical",
+  Sideways: "Horizontal",
+  "Rotation locked": "Rotación bloqueada",
+  "Rotation unlocked": "Rotación desbloqueada",
+  "Lock rotation": "Bloquear rotación",
+  "Unlock rotation": "Desbloquear rotación",
+  "Auto-rotate follows how you hold the phone. Upright or Sideways keeps the table that way.":
+    "Girar solo sigue cómo sostienes el teléfono. Vertical u Horizontal deja la mesa fija así.",
 
   // Joining and waiting room
   Loading: "Cargando",

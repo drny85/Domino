@@ -53,4 +53,18 @@ describe("board layout", () => {
     for (let i = r + 2; i < board.length; i++) expect(byId.get(board[i].id)!.a).toBe(byId.get(board[i - 1].id)!.b);
     for (let i = r - 2; i >= 0; i--) expect(byId.get(board[i].id)!.a).toBe(byId.get(board[i + 1].id)!.b);
   });
+
+  it("keeps rows a tile and a half apart, like iOS", () => {
+    for (let seed = 1; seed < 200; seed++) {
+      const placed = layoutBoard(randomBoard(seed), 3.5);
+      // Non-double tiles lying along x are row tiles. Rows sit 3 units (1.5 tiles)
+      // apart; each double in the corner run adds one unit.
+      const rows = [...new Set(placed.filter((t) => !t.isDouble && Math.abs(Math.sin(t.rotY)) > 0.5).map((t) => t.z))].sort((a, b) => a - b);
+      for (let i = 1; i < rows.length; i++) {
+        const gap = rows[i] - rows[i - 1];
+        if (rows[i - 1] < 0 && rows[i] > 0) continue; // different branches
+        expect([3, 4, 5]).toContain(gap);
+      }
+    }
+  });
 });
