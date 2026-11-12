@@ -15,7 +15,7 @@ import {
   chooseCpuMoveForLevel,
   isCapicua,
   chooseOpeningTile,
-  deal,
+  dealFair,
   findOpening,
   generateRoomCode,
   hasPlayableTile,
@@ -197,6 +197,31 @@ async function finishRound(
   }
 }
 
+/**
+ * A bonus paid mid-round that takes a side to the target ends the match on
+ * the spot, as at a real table: nobody plays out the rest of the round.
+ */
+async function endMatchOnBonus(ctx: MutationCtx, roomId: Id<"rooms">, bonus: NonNullable<Doc<"rooms">["bonusEvent"]>) {
+  const room = (await ctx.db.get(roomId))!;
+  const players = await getPlayers(ctx, roomId);
+  const teams = teamsOf(room, players);
+  const winnerIdx = players.findIndex((p) => p.seatIndex === bonus.seatIndex);
+  if (winnerIdx < 0) return false;
+  const team = teams[winnerIdx];
+  const total = players.reduce((sum, p, i) => (teams[i] === team ? sum + p.score : sum), 0);
+  if (total < (room.targetScore ?? DEFAULT_TARGET_SCORE)) return false;
+  await ctx.db.patch(roomId, {
+    status: "finished",
+    winnerSessionId: players[winnerIdx].sessionId,
+    winReason: "bonus",
+    matchOver: true,
+    matchWinnerTeam: team,
+    lastRound: { points: bonus.points, bonus: bonus.points, bonusKind: bonus.kind },
+    turnDeadline: undefined,
+  });
+  return true;
+}
+
 async function endIfBlocked(
   ctx: MutationCtx,
   room: Doc<"rooms">,
@@ -356,6 +381,7 @@ async function applyDrawOrPass(
     lastAction: { seatIndex: me.seatIndex, kind: "pass", at: Date.now(), ...flag },
     ...(bonusEvent ? { bonusEvent } : {}),
   });
+  if (bonusEvent && (await endMatchOnBonus(ctx, room._id, bonusEvent))) return "won" as const;
   return "passed" as const;
 }
 
@@ -691,7 +717,8 @@ async function beginRound(ctx: MutationCtx, roomId: Id<"rooms">) {
 
   // A finished match starts over: scores back to zero, round 1.
   const newMatch = !!room.matchOver;
-  const { hands, boneyard } = deal(players.length);
+  // A hand with 5 or more doubles is thrown in and the tiles are dealt again.
+  const { hands, boneyard } = dealFair(players.length);
   // Seats are re-packed to 0..n-1 so `(seat + 1) % playerCount` always works.
   // In 2v2 the lobby already fills seats 0-3, so partners stay across.
   for (let i = 0; i < players.length; i++) {
@@ -929,6 +956,10 @@ export const getGameState = query({
         targetScore: room.targetScore ?? DEFAULT_TARGET_SCORE,
         matchOver: !!room.matchOver,
         matchWinnerTeam: room.matchWinnerTeam ?? null,
+        // Zapatero: the match was won with the other side still on 0.
+        zapatero:
+          !!room.matchOver &&
+          players.every((p) => teamOf(p.seatIndex) === room.matchWinnerTeam || p.score === 0),
         currentTurnSeat: room.currentTurnSeat,
         openEnds: room.openEnds,
         board: room.board,

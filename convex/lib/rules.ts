@@ -51,6 +51,21 @@ export function deal(
   return { hands, boneyard: deck };
 }
 
+/** A hand this many doubles or more is thrown in and everything is redealt. */
+export const REDEAL_DOUBLES = 5;
+
+export function needsRedeal(hands: Tile[][]): boolean {
+  return hands.some((h) => h.filter((t) => t.a === t.b).length >= REDEAL_DOUBLES);
+}
+
+/** Deals, and deals again while any hand holds too many doubles. */
+export function dealFair(playerCount: number, random: () => number = Math.random): { hands: Tile[][]; boneyard: Tile[] } {
+  for (;;) {
+    const d = deal(playerCount, random);
+    if (!needsRedeal(d.hands)) return d;
+  }
+}
+
 /**
  * Who leads a new match, and with which tile: the highest double, otherwise the
  * heaviest single tile (ties broken by highest single pip, then lowest index).

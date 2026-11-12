@@ -211,6 +211,8 @@ export const ES: Record<string, string> = {
   "{name} wins": "Gana {name}",
   "You played every tile.": "Jugaste todas tus fichas.",
   "{name} played every tile.": "{name} jugó todas sus fichas.",
+  "A bonus took them to the target.": "Un bono los llevó a la meta.",
+  "¡Zapatero!": "¡Zapatero!",
   "Nobody could move. Lowest pip count takes it.": "Tranque: nadie podía jugar. Gana quien tiene menos puntos en la mano.",
   "Nobody could move and the low pip counts tied. No points this round.": "Tranque con empate en puntos. Nadie anota en esta mano.",
   "First to {n} points.": "A {n} puntos.",

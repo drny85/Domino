@@ -984,7 +984,9 @@ function RoundOverSheet({
       ? winner?.isMe
         ? t("You played every tile.")
         : t("{name} played every tile.", { name: winner?.name ?? t("Someone") })
-      : room.winReason === "blocked"
+      : room.winReason === "bonus"
+        ? t("A bonus took them to the target.")
+        : room.winReason === "blocked"
         ? t("Nobody could move. Lowest pip count takes it.")
         : t("Nobody could move and the low pip counts tied. No points this round.");
 
@@ -992,6 +994,9 @@ function RoundOverSheet({
     <div className="absolute inset-0 z-20 flex items-end bg-black/50 backdrop-blur-[2px] sm:items-center sm:justify-center">
       <div className="mx-auto max-h-full w-full max-w-lg overflow-y-auto rounded-t-3xl bg-stone-900 p-5 pb-safe shadow-2xl sm:max-w-md sm:rounded-3xl">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+        {room.zapatero && (
+          <p className="text-center text-3xl font-black tracking-wide text-brass-light">{t("¡Zapatero!")}</p>
+        )}
         <h2 className="text-center text-2xl font-bold">{headline}</h2>
         <p className="mt-1 text-center text-sm text-stone-400">
           {room.matchOver ? `${t("First to {n} points.", { n: room.targetScore })} ` : ""}

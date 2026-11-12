@@ -481,6 +481,23 @@ describe("bonuses", () => {
     expect(await score(off.t, off.roomId, 0)).toBe(0);
   });
 
+  it("a bonus that reaches the target ends the match on the spot, and a shutout is a zapatero", async () => {
+    const { t, roomId } = await afterOpening("block", [{ id: "0-1", a: 0, b: 1 }, { id: "2-3", a: 2, b: 3 }]);
+    await t.run(async (ctx) => {
+      const p0 = (await ctx.db.query("players").collect()).find((p) => p.seatIndex === 0)!;
+      await ctx.db.patch(p0._id, { score: 190 });
+    });
+    const result = await t.mutation(api.games.drawOrPass, { roomId, sessionId: S(1) });
+    expect(result.result).toBe("won");
+    const s = (await t.query(api.games.getGameState, { roomId, sessionId: S(1) }))!;
+    expect(s.room.status).toBe("finished");
+    expect(s.room.winReason).toBe("bonus");
+    expect(s.room.matchOver).toBe(true);
+    expect(s.room.matchWinnerTeam).toBe(0);
+    expect(s.room.zapatero).toBe(true);
+    expect(s.room.lastRound).toMatchObject({ points: 25, bonus: 25, bonusKind: "salida" });
+  });
+
   it("a capicúa pays the room's bonus value", async () => {
     const { t, roomId } = await setupRoom(2, "block");
     await t.mutation(api.games.setRoomOptions, { roomId, sessionId: S(0), bonuses: true, bonusPoints: 30 });

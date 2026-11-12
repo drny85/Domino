@@ -150,6 +150,15 @@ describe("blocked games and scoring", () => {
   });
 });
 
+describe("redeal", () => {
+  it("throws in a deal where a hand holds five or more doubles", async () => {
+    const { needsRedeal, dealFair } = await import("../convex/lib/rules");
+    expect(needsRedeal([[t(0, 0), t(1, 1), t(2, 2), t(3, 3), t(4, 5)], [t(5, 5)]])).toBe(false);
+    expect(needsRedeal([[t(0, 0), t(1, 1), t(2, 2), t(3, 3), t(4, 4)], [t(5, 6)]])).toBe(true);
+    for (let i = 0; i < 200; i++) expect(needsRedeal(dealFair(4).hands)).toBe(false);
+  });
+});
+
 describe("bonuses and CPU levels", () => {
   it("recognises a capicúa", async () => {
     const { isCapicua } = await import("../convex/lib/rules");
